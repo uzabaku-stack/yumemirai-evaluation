@@ -1,0 +1,25 @@
+"use client";
+import { FormEvent, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import type { CurrentUser, Staff } from "@/lib/types";
+
+export function NewEvaluationForm({ staff, user }: { staff: Staff[]; user: CurrentUser }) {
+  const router = useRouter();
+  const search = useSearchParams();
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const isDirector = user.role === "director";
+  const selectedStaffId = isDirector ? (search.get("staff") ?? staff[0]?.id) : user.staff_id;
+  const [saving, setSaving] = useState(false);
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    const formData = new FormData(event.currentTarget);
+    const body = Object.fromEntries(formData.entries());
+    const response = await fetch("/api/evaluations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) { alert("この評価は作成できません。"); setSaving(false); return; }
+    const data = await response.json();
+    router.push("/evaluations/" + data.id + "/edit");
+  }
+  return <form onSubmit={onSubmit} className="rounded border border-teal-900/10 bg-white p-6 shadow-soft"><div className="grid gap-5 md:grid-cols-2"><label className="space-y-2"><span className="font-bold">評価対象スタッフ</span>{isDirector ? <select name="staff_id" defaultValue={selectedStaffId ?? undefined} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" required>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select> : <><input type="hidden" name="staff_id" value={user.staff_id ?? ""} /><div className="flex h-14 items-center rounded border border-slate-200 bg-slate-50 px-4 text-lg font-bold">{user.name}</div></>}</label><label className="space-y-2"><span className="font-bold">評価者名</span><input name="evaluator_name" defaultValue={isDirector ? "" : user.name} readOnly={!isDirector} className="h-14 w-full rounded border border-slate-300 px-4 text-lg read-only:bg-slate-50" placeholder="院長・副院長など" required /></label><label className="space-y-2"><span className="font-bold">評価タイプ</span>{isDirector ? <select name="evaluation_type" className="h-14 w-full rounded border border-slate-300 px-4 text-lg"><option value="other">他者評価</option><option value="self">本人評価</option></select> : <><input type="hidden" name="evaluation_type" value="self" /><div className="flex h-14 items-center rounded border border-slate-200 bg-slate-50 px-4 text-lg font-bold">本人評価</div></>}</label><label className="space-y-2"><span className="font-bold">評価年月</span><input type="month" name="evaluation_month" defaultValue={month} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" required /></label><label className="space-y-2"><span className="font-bold">記載日</span><input type="date" name="entry_date" defaultValue={today} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" required /></label></div><button disabled={saving} className="mt-7 w-full rounded bg-clinic px-6 py-5 text-xl font-bold text-white disabled:opacity-60">{saving ? "作成中..." : isDirector ? "評価シートを作成" : "自己評価を開始"}</button></form>;
+}

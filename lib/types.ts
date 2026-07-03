@@ -1,0 +1,12 @@
+export type Staff = { id: number; name: string; role: string; active: number; created_at: string; latest_date?: string | null; latest_score?: number | null; has_evaluations?: boolean };
+export type StaffRole = { id: number; name: string; active: number; role_order: number; created_at: string; has_staff?: boolean; has_items?: boolean };
+export type EvaluationItem = { id: number; section_name: string; item_name: string; criteria: string; item_order: number; active: number; target_roles?: string[] };
+export type EvaluationType = "self" | "peer" | "director" | "other";
+export type Evaluation = { id: number; staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month: string; entry_date: string; total_score: number; max_score: number; average_score: number; rank: string; comments: string; created_at: string; updated_at: string; staff_name?: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; evaluator_staff_name?: string; is_360?: number };
+export type EvaluationScore = { evaluation_id: number; item_id: number; score: number | null; comment: string; not_applicable?: number; section_name?: string; item_name?: string; criteria?: string; item_order?: number };
+export type RatingCriterion = { score: number; label: string; description: string; criterion_order: number };
+export type UserRole = "director" | "staff";
+export type AppUser = { id: number; login_id: string; name: string; role: UserRole; staff_id: number | null; password_hash?: string; pin?: string; active: number; created_at: string };
+export type CurrentUser = Omit<AppUser, "pin" | "active" | "created_at">;
+export type CommentValues = Record<string, string>;
+export type ScoreSummary = { totalScore: number; maxScore: number; averageScore: number; rank: string; sectionScores: Array<{ section: string; total: number; max: number; average: number; count: number }> };
