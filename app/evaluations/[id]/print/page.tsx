@@ -3,13 +3,14 @@ import { PrintButton } from "@/components/PrintButton";
 import { canViewEvaluation, getCurrentUser } from "@/lib/auth";
 import { getEvaluation, getEvaluationItemsForEvaluation, getEvaluationScores, getRatingCriteriaText } from "@/lib/db";
 import { calculateSummary, parseComments } from "@/lib/scoring";
+import { isDirectorRole } from "@/lib/permissions";
 
 export default async function PrintEvaluationPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   const { id } = await params;
   const evaluation = getEvaluation(Number(id));
-  if (!evaluation || user.role !== "director" || !canViewEvaluation(user, evaluation)) notFound();
+  if (!evaluation || !isDirectorRole(user.role) || !canViewEvaluation(user, evaluation)) notFound();
   const items = getEvaluationItemsForEvaluation(evaluation.id);
   const scores = getEvaluationScores(evaluation.id);
   const summary = calculateSummary(items, scores);

@@ -1,4 +1,5 @@
 "use client";
+import { isDirectorRole } from "@/lib/permissions";
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -62,7 +63,7 @@ export function Evaluation360Matrix({ user, items, targets, afterSavePath = "/36
   const [selfComments, setSelfComments] = useState<Record<string, string>>(() => initialSelfComments(selfTarget));
   const [saving, setSaving] = useState(false);
   const grouped = useMemo(() => items.reduce((acc, item) => { (acc[item.section_name] ||= []).push(item); return acc; }, {} as Record<string, EvaluationItem[]>), [items]);
-  const isDirectorMode = user.role === "director";
+  const isDirectorMode = isDirectorRole(user.role);
 
   function setCell(evaluationId: number, itemId: number, value: CellValue) {
     setValues((current) => ({ ...current, [cellKey(evaluationId, itemId)]: value }));

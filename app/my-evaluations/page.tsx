@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Edit3 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { getEvaluations } from "@/lib/db";
+import { isDirectorRole } from "@/lib/permissions";
 
 function statusLabel(evaluations: Array<{ max_score: number; average_score: number }>) {
   return evaluations.length && evaluations.every((evaluation) => evaluation.max_score > 0 && evaluation.average_score > 0) ? "入力済み" : "未入力";
@@ -11,7 +12,7 @@ function statusLabel(evaluations: Array<{ max_score: number; average_score: numb
 export default async function MyEvaluationsPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (user.role === "director") redirect("/360/results");
+  if (isDirectorRole(user.role)) redirect("/360/results");
   const evaluations = getEvaluations().filter((evaluation) => evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id && (evaluation.evaluation_type === "self" || evaluation.evaluation_type === "peer"));
   const rows = Array.from(evaluations.reduce((map, evaluation) => {
     const row = map.get(evaluation.evaluation_month) ?? { month: evaluation.evaluation_month, entryDate: evaluation.entry_date, evaluations: [] as typeof evaluations };

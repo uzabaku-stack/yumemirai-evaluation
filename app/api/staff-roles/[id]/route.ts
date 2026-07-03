@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { deleteStaffRole, updateStaffRole } from "@/lib/db";
+import { isDirectorRole } from "@/lib/permissions";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (user.role !== "director") return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const body = await request.json();
   try {
@@ -19,7 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (user.role !== "director") return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const result = deleteStaffRole(Number(id));
   if (!result.deleted && result.reason === "in_use") return NextResponse.json({ message: "使用中の職種は削除できません。先にスタッフや評価項目から外してください。" }, { status: 409 });

@@ -4,13 +4,14 @@ import { EvaluationCommentForm } from "@/components/EvaluationCommentForm";
 import { getCurrentUser } from "@/lib/auth";
 import { getEvaluation, getOrCreate360Evaluation, getStaffList } from "@/lib/db";
 import { parseComments } from "@/lib/scoring";
+import { isDirectorRole } from "@/lib/permissions";
 
 const directorFields = ["総合所見", "強み", "課題", "期待すること", "来期目標"];
 
 export default async function DirectorEvaluationCommentPage({ searchParams }: { searchParams?: Promise<{ saved?: string }> }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (user.role !== "director") redirect("/");
+  if (!isDirectorRole(user.role)) redirect("/");
   const query = searchParams ? await searchParams : {};
   const targets = getStaffList().map((staff) => {
     const evaluationId = getOrCreate360Evaluation(user, staff.id);

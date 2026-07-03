@@ -5,8 +5,25 @@
 :root { color: #24313f; background: #fbfaf7; }
 body { min-height: 100vh; background: #fbfaf7; }
 button, input, select, textarea { font: inherit; }
+
+.print-only { display: none; }
 @media print {
-  .no-print { display: none !important; }
-  body { background: white; }
-  .print-page { box-shadow: none !important; margin: 0 !important; max-width: none !important; }
+  @page { size: A4 portrait; margin: 12mm; }
+  html, body { background: white !important; color: #111827 !important; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  header, nav, button, .no-print { display: none !important; }
+  main { max-width: none !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+  .print-only { display: block !important; }
+  .print-page { box-shadow: none !important; margin: 0 !important; max-width: none !important; width: 100% !important; padding: 0 !important; background: white !important; }
+  .print-section { break-inside: avoid; page-break-inside: avoid; }
+  .print-page-break { break-before: page; page-break-before: always; }
+  table { break-inside: auto; page-break-inside: auto; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  th, td { font-size: 10px; padding-top: 4px !important; padding-bottom: 4px !important; }
+  svg { max-height: 95mm; }
+  .shadow-soft { box-shadow: none !important; }
+  .rounded, .rounded-lg { border-radius: 4px !important; }
+  .print-compact { font-size: 11px !important; line-height: 1.45 !important; }
+  .print-note-box { min-height: 28mm; border: 1px solid #94a3b8; background: white; }
+  .print-sign-line { height: 14mm; border-bottom: 1px solid #334155; }
 }

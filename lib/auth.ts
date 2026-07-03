@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import type { CurrentUser, Evaluation } from "./types";
+import { isDirectorRole } from "@/lib/permissions";
 
 export const AUTH_COOKIE = "yumemirai_session";
 const AUTH_SECRET = process.env.AUTH_SECRET ?? "yumemirai-local-auth-secret";
@@ -37,17 +38,17 @@ export async function getCurrentUser() {
 }
 
 export function canViewEvaluation(user: CurrentUser, evaluation: Evaluation) {
-  if (user.role === "director") return true;
+  if (isDirectorRole(user.role)) return true;
   return evaluation.evaluation_type === "self" && evaluation.staff_id === user.staff_id;
 }
 
 export function canEditEvaluation(user: CurrentUser, evaluation: Evaluation) {
-  if (user.role === "director") return true;
+  if (isDirectorRole(user.role)) return true;
   if (canViewEvaluation(user, evaluation)) return true;
   return evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id;
 }
 
 export function canCreateEvaluationFor(user: CurrentUser, staffId: number, evaluationType: Evaluation["evaluation_type"]) {
-  if (user.role === "director") return true;
+  if (isDirectorRole(user.role)) return true;
   return evaluationType === "self" && user.staff_id === staffId;
 }

@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { calculateSummary, defaultRatingCriteria, formatRatingCriteria } from "./scoring";
-import type { AppUser, CommentValues, CurrentUser, Evaluation, EvaluationItem, EvaluationScore, EvaluationType, RatingCriterion, Staff, StaffRole } from "./types";
+import type { AppUser, CommentValues, CurrentUser, Evaluation, EvaluationCycle, EvaluationCycleStatus, EvaluationItem, EvaluationScore, EvaluationType, RatingCriterion, Staff, StaffRole } from "./types";
+import { isDirectorRole } from "@/lib/permissions";
 
 type JsonEvaluationScore = EvaluationScore & { id: number };
 type AppData = {
-  nextIds: { staff: number; evaluation: number; item: number; score: number; user: number; staff_role?: number };
+  nextIds: { staff: number; evaluation: number; item: number; score: number; user: number; staff_role?: number; evaluation_cycle?: number };
   staff: Staff[];
   users: AppUser[];
   evaluation_items: EvaluationItem[];
@@ -14,6 +15,7 @@ type AppData = {
   evaluation_scores: JsonEvaluationScore[];
   rating_criteria: RatingCriterion[];
   staff_roles: StaffRole[];
+  evaluation_cycles: EvaluationCycle[];
 };
 
 const defaultDataFile = path.join(process.cwd(), "data", "yumemirai.json");
@@ -316,26 +318,60 @@ function normalizeRatingCriteria(criteria: RatingCriterion[] | undefined): Ratin
     return { score: fallback.score, label: current?.label || fallback.label, description: current?.description || fallback.description, criterion_order: fallback.score };
   });
 }
-function createEmptyData(): AppData { return { nextIds: { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1 }, staff: [], users: [], evaluation_items: [], evaluations: [], evaluation_scores: [], rating_criteria: [], staff_roles: [] }; }
+function createEmptyData(): AppData { return { nextIds: { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1 }, staff: [], users: [], evaluation_items: [], evaluations: [], evaluation_scores: [], rating_criteria: [], staff_roles: [], evaluation_cycles: [] }; }
 function saveData(data: AppData) { mkdirSync(dataDir, { recursive: true }); const tempFile = dataFile + ".tmp"; writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8"); renameSync(tempFile, dataFile); }
+function monthFromDate(value: string | undefined) { return value && /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : new Date().toISOString().slice(0, 7); }
+function monthEndDate(month: string) { const [year, monthNumber] = month.split("-").map(Number); return new Date(year, monthNumber, 0).toISOString().slice(0, 10); }
+function defaultCycleName(month: string) { const [year, monthNumber] = month.split("-").map(Number); return `${year}年 ${monthNumber <= 6 ? "夏評価" : "冬評価"}`; }
+function normalizeCycleStatus(status: string | undefined): EvaluationCycleStatus { return status === "draft" || status === "active" || status === "closed" ? status : "draft"; }
+function createCycleForMonth(data: AppData, month: string, status: EvaluationCycleStatus) {
+  const timestamp = now();
+  const cycle: EvaluationCycle = { id: data.nextIds.evaluation_cycle ?? 1, name: defaultCycleName(month), startDate: `${month}-01`, endDate: monthEndDate(month), status, created_at: timestamp, updated_at: timestamp, item_snapshot: [], rating_criteria_snapshot: [] };
+  data.nextIds.evaluation_cycle = (data.nextIds.evaluation_cycle ?? 1) + 1;
+  data.evaluation_cycles.push(cycle);
+  return cycle;
+}
+function ensureEvaluationCycles(data: AppData) {
+  data.evaluation_cycles = (data.evaluation_cycles ?? []).map((cycle) => ({ ...cycle, status: normalizeCycleStatus(cycle.status), item_snapshot: Array.isArray(cycle.item_snapshot) ? cycle.item_snapshot : [], rating_criteria_snapshot: Array.isArray(cycle.rating_criteria_snapshot) ? cycle.rating_criteria_snapshot : [] }));
+  const currentMonth = monthFromDate(undefined);
+  const cycleByMonth = new Map<string, EvaluationCycle>();
+  for (const cycle of data.evaluation_cycles) cycleByMonth.set(monthFromDate(cycle.startDate), cycle);
+  const months = Array.from(new Set(data.evaluations.map((evaluation) => monthFromDate(evaluation.evaluation_month || evaluation.entry_date)))).sort();
+  for (const month of months) if (!cycleByMonth.has(month)) cycleByMonth.set(month, createCycleForMonth(data, month, month === currentMonth ? "active" : "closed"));
+  if (!data.evaluation_cycles.length) cycleByMonth.set(currentMonth, createCycleForMonth(data, currentMonth, "active"));
+  if (!data.evaluation_cycles.some((cycle) => cycle.status === "active")) {
+    const latest = [...data.evaluation_cycles].sort((a, b) => b.startDate.localeCompare(a.startDate) || b.id - a.id)[0];
+    if (latest) latest.status = "active";
+  }
+  const activeCycles = data.evaluation_cycles.filter((cycle) => cycle.status === "active").sort((a, b) => a.id - b.id);
+  for (const cycle of activeCycles.slice(0, -1)) cycle.status = "closed";
+  for (const evaluation of data.evaluations) {
+    if (!evaluation.evaluation_cycle_id) {
+      const month = monthFromDate(evaluation.evaluation_month || evaluation.entry_date);
+      evaluation.evaluation_cycle_id = cycleByMonth.get(month)?.id ?? data.evaluation_cycles.find((cycle) => cycle.status === "active")?.id ?? null;
+    }
+  }
+}
 function normalizeIds(data: AppData) {
-  const ids = data.nextIds ?? { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1 };
-  data.nextIds = { staff: ids.staff ?? 1, evaluation: ids.evaluation ?? 1, item: ids.item ?? 1, score: ids.score ?? 1, user: ids.user ?? 1, staff_role: ids.staff_role ?? 1 };
-  data.staff ??= []; data.users ??= []; data.evaluation_items ??= []; data.evaluations ??= []; data.evaluation_scores ??= []; data.rating_criteria ??= []; data.staff_roles ??= [];
+  const ids = data.nextIds ?? { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1 };
+  data.nextIds = { staff: ids.staff ?? 1, evaluation: ids.evaluation ?? 1, item: ids.item ?? 1, score: ids.score ?? 1, user: ids.user ?? 1, staff_role: ids.staff_role ?? 1, evaluation_cycle: ids.evaluation_cycle ?? 1 };
+  data.staff ??= []; data.users ??= []; data.evaluation_items ??= []; data.evaluations ??= []; data.evaluation_scores ??= []; data.rating_criteria ??= []; data.staff_roles ??= []; data.evaluation_cycles ??= [];
   data.staff = data.staff.map((staff) => ({ ...staff, role: normalizeStaffRole(staff.role) }));
   data.users = data.users.map((user) => {
-    const fallbackPassword = user.pin || (user.role === "director" ? defaultDirectorPassword : defaultStaffPassword);
+    const fallbackPassword = user.pin || (isDirectorRole(user.role) ? defaultDirectorPassword : defaultStaffPassword);
     return { ...user, password_hash: user.password_hash || hashPassword(fallbackPassword), pin: undefined };
   });
-  data.evaluations = data.evaluations.map((evaluation) => ({ ...evaluation, evaluator_user_id: evaluation.evaluator_user_id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? null, is_360: evaluation.is_360 ? 1 : 0 }));
+  data.evaluations = data.evaluations.map((evaluation) => ({ ...evaluation, evaluator_user_id: evaluation.evaluator_user_id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? null, is_360: evaluation.is_360 ? 1 : 0, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null }));
   data.evaluation_scores = data.evaluation_scores.map((score) => ({ ...score, not_applicable: score.not_applicable ? 1 : 0 }));
   data.evaluation_items = data.evaluation_items.map((item) => ({ ...item, target_roles: normalizeTargetRoles(Array.isArray(item.target_roles) ? item.target_roles : []) }));
+  ensureEvaluationCycles(data);
   data.nextIds.staff = Math.max(data.nextIds.staff, ...data.staff.map((item) => item.id + 1), 1);
   data.nextIds.item = Math.max(data.nextIds.item, ...data.evaluation_items.map((item) => item.id + 1), 1);
   data.nextIds.evaluation = Math.max(data.nextIds.evaluation, ...data.evaluations.map((item) => item.id + 1), 1);
   data.nextIds.score = Math.max(data.nextIds.score, ...data.evaluation_scores.map((item) => item.id + 1), 1);
   data.nextIds.user = Math.max(data.nextIds.user, ...data.users.map((item) => item.id + 1), 1);
   data.nextIds.staff_role = Math.max(data.nextIds.staff_role ?? 1, ...data.staff_roles.map((item) => item.id + 1), 1);
+  data.nextIds.evaluation_cycle = Math.max(data.nextIds.evaluation_cycle ?? 1, ...data.evaluation_cycles.map((item) => item.id + 1), 1);
 }
 function seedData(data: AppData) {
   let changed = false;
@@ -376,13 +412,15 @@ function loadData(): AppData {
   if (existsSync(sourceFile)) {
     try { data = { ...data, ...JSON.parse(readFileSync(sourceFile, "utf8")) } as AppData; } catch { data = createEmptyData(); }
   }
+  const beforeNormalize = JSON.stringify(data);
   normalizeIds(data);
-  if (seedData(data) || !existsSync(dataFile)) saveData(data);
+  const normalizedChanged = JSON.stringify(data) !== beforeNormalize;
+  if (seedData(data) || normalizedChanged || !existsSync(dataFile)) saveData(data);
   return data;
 }
 let store = loadData();
 function persist() { normalizeIds(store); saveData(store); }
-function withStaffName(evaluation: Evaluation): Evaluation { const staff = store.staff.find((person) => person.id === evaluation.staff_id); const evaluatorStaff = evaluation.evaluator_staff_id ? store.staff.find((person) => person.id === evaluation.evaluator_staff_id) : null; return { ...evaluation, staff_name: staff?.name ?? "", evaluator_staff_name: evaluatorStaff?.name ?? evaluation.evaluator_name ?? "" }; }
+function withStaffName(evaluation: Evaluation): Evaluation { const staff = store.staff.find((person) => person.id === evaluation.staff_id); const evaluatorStaff = evaluation.evaluator_staff_id ? store.staff.find((person) => person.id === evaluation.evaluator_staff_id) : null; const cycle = evaluation.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === evaluation.evaluation_cycle_id) : null; return { ...evaluation, staff_name: staff?.name ?? "", evaluator_staff_name: evaluatorStaff?.name ?? evaluation.evaluator_name ?? "", evaluation_cycle_name: cycle?.name ?? null }; }
 function staffHasEvaluations(staffId: number) { return store.evaluations.some((evaluation) => evaluation.staff_id === staffId); }
 function syncStaffUser(staff: Staff) {
   const loginId = "staff-" + staff.id;
@@ -396,16 +434,16 @@ function snapshotItem(item: EvaluationItem): Pick<EvaluationScore, "section_name
 const evaluationThemes = ["臨床スキル", "技工・機器関連スキル", "矯正関連スキル", "外科・診療補助スキル", "接遇・事務対応", "チーム・貢献姿勢"] as const;
 type EvaluationTheme = typeof evaluationThemes[number];
 const sectionAxisMap: Array<{ theme: EvaluationTheme; keywords: string[] }> = [
-  { theme: "臨床スキル", keywords: ["臨床スキル", "臨床"] },
-  { theme: "技工・機器関連スキル", keywords: ["技工", "機器"] },
-  { theme: "矯正関連スキル", keywords: ["矯正"] },
-  { theme: "外科・診療補助スキル", keywords: ["外科", "診療補助"] },
-  { theme: "接遇・事務対応", keywords: ["接遇", "事務"] },
-  { theme: "チーム・貢献姿勢", keywords: ["チーム", "貢献"] },
+  { theme: "臨床スキル", keywords: ["臨床スキル", "臨床", "SRP", "TBI", "メインテナンス", "口腔", "印象", "Tec", "TEC"] },
+  { theme: "技工・機器関連スキル", keywords: ["技工", "機器", "スキャナー", "CAD", "CAM", "模型"] },
+  { theme: "矯正関連スキル", keywords: ["矯正", "インビザ", "ワイヤー", "ブラケット", "リテーナー", "プレオルソ"] },
+  { theme: "外科・診療補助スキル", keywords: ["外科", "診療補助", "抜歯", "アシスト", "CR", "服薬", "器具"] },
+  { theme: "接遇・事務対応", keywords: ["接遇", "事務", "患者応対", "予約", "会計", "電話", "清掃"] },
+  { theme: "チーム・貢献姿勢", keywords: ["チーム", "貢献", "報告", "連絡", "相談", "教育", "自己研鑽", "改善", "Line", "礼儀"] },
 ];
-function themeForScore(score: Pick<EvaluationScore, "section_name">) {
-  const section = String(score.section_name ?? "");
-  const match = sectionAxisMap.find((group) => group.keywords.some((keyword) => section.includes(keyword)));
+function themeForScore(score: Pick<EvaluationScore, "section_name" | "item_name">) {
+  const text = String((score.section_name ?? "") + " " + (score.item_name ?? ""));
+  const match = sectionAxisMap.find((group) => group.keywords.some((keyword) => text.includes(keyword)));
   return match?.theme ?? null;
 }
 function averageNumbers(values: number[]) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null; }
@@ -435,11 +473,77 @@ function commentsForSelfEvaluation(evaluations: Evaluation[]) {
   return self?.comments ?? "{}";
 }
 
+function getActiveCycleInternal() { return [...store.evaluation_cycles].sort((a, b) => (a.status === "active" ? -1 : b.status === "active" ? 1 : b.startDate.localeCompare(a.startDate) || b.id - a.id))[0]; }
+function cycleMonth(cycle: EvaluationCycle | undefined) { return monthFromDate(cycle?.startDate); }
+function evaluationsForStaffCycle(staffId: number, cycleId: number) { return store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && evaluation.staff_id === staffId && evaluation.evaluation_cycle_id === cycleId).map(withStaffName); }
+function itemAveragesForEvaluations(evaluations: Evaluation[]) { return buildGlobalItemAverages(evaluations).sort((a, b) => (a.average ?? 99) - (b.average ?? 99)); }
+function buildStaffCycleHistory(staff: Staff, cycle: EvaluationCycle) {
+  const evaluations = evaluationsForStaffCycle(staff.id, cycle.id);
+  const overall_average = overallAverageForEvaluations(evaluations);
+  const themes = themeAveragesForEvaluations(evaluations);
+  const ranked = themes.filter((item): item is { theme: EvaluationTheme; average: number } => item.average !== null);
+  const strengths = [...ranked].sort((a, b) => b.average - a.average).slice(0, 3);
+  const improvements = [...ranked].sort((a, b) => a.average - b.average).slice(0, 3);
+  const self_comments = commentsForSelfEvaluation(evaluations);
+  const comments = JSON.parse(self_comments || "{}");
+  const comment_exists = Object.values(comments).some((value) => String(value ?? "").trim().length > 0);
+  return { staff: enrichStaff(staff), cycle, overall_average, themes, strengths, improvements, comment_exists, self_comments, item_averages: itemAveragesForEvaluations(evaluations), evaluations };
+}
+export function getEvaluationCycles() { return [...store.evaluation_cycles].sort((a, b) => b.startDate.localeCompare(a.startDate) || b.id - a.id); }
+export function getEvaluationCycle(id: number) { return store.evaluation_cycles.find((cycle) => cycle.id === id) ?? null; }
+export function getActiveEvaluationCycle() { return getActiveCycleInternal(); }
+export function createEvaluationCycle(input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
+  const timestamp = now();
+  const status = normalizeCycleStatus(input.status);
+  if (status === "active") store.evaluation_cycles = store.evaluation_cycles.map((cycle) => ({ ...cycle, status: cycle.status === "active" ? "closed" : cycle.status }));
+  const cycle: EvaluationCycle = { id: store.nextIds.evaluation_cycle ?? 1, name: input.name.trim() || defaultCycleName(monthFromDate(input.startDate)), startDate: input.startDate, endDate: input.endDate, status, created_at: timestamp, updated_at: timestamp, item_snapshot: getAllEvaluationItems(), rating_criteria_snapshot: getRatingCriteria() };
+  store.nextIds.evaluation_cycle = (store.nextIds.evaluation_cycle ?? 1) + 1;
+  store.evaluation_cycles.push(cycle);
+  persist();
+  return cycle;
+}
+export function updateEvaluationCycle(id: number, input: Partial<{ name: string; startDate: string; endDate: string; status: EvaluationCycleStatus }>) {
+  const cycle = store.evaluation_cycles.find((item) => item.id === id);
+  if (!cycle) throw new Error("Evaluation cycle not found");
+  if (input.status === "active") store.evaluation_cycles = store.evaluation_cycles.map((item) => ({ ...item, status: item.id !== id && item.status === "active" ? "closed" : item.status }));
+  if (input.name !== undefined) cycle.name = input.name.trim() || cycle.name;
+  if (input.startDate !== undefined) cycle.startDate = input.startDate;
+  if (input.endDate !== undefined) cycle.endDate = input.endDate;
+  if (input.status !== undefined) cycle.status = normalizeCycleStatus(input.status);
+  cycle.updated_at = now();
+  persist();
+  return cycle;
+}
+export function copyEvaluationCycle(id: number, input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
+  const source = store.evaluation_cycles.find((cycle) => cycle.id === id);
+  if (!source) throw new Error("Evaluation cycle not found");
+  const cycle = createEvaluationCycle({ ...input, status: input.status ?? "draft" });
+  cycle.item_snapshot = source.item_snapshot?.length ? source.item_snapshot : getAllEvaluationItems();
+  cycle.rating_criteria_snapshot = source.rating_criteria_snapshot?.length ? source.rating_criteria_snapshot : getRatingCriteria();
+  cycle.updated_at = now();
+  persist();
+  return cycle;
+}
+export function getStaffEvaluationHistory(staffId: number) {
+  const staff = store.staff.find((person) => person.id === staffId);
+  if (!staff) return [];
+  return getEvaluationCycles().map((cycle) => buildStaffCycleHistory(staff, cycle)).filter((row) => row.evaluations.length > 0);
+}
+export function getStaffEvaluationHistoryDetail(staffId: number, cycleId: number) {
+  const staff = store.staff.find((person) => person.id === staffId);
+  const cycle = store.evaluation_cycles.find((item) => item.id === cycleId);
+  if (!staff || !cycle) return null;
+  return buildStaffCycleHistory(staff, cycle);
+}
 export function getRatingCriteria(): RatingCriterion[] { return normalizeRatingCriteria(store.rating_criteria).map((criterion) => ({ ...criterion })); }
 export function getRatingCriteriaText() { return formatRatingCriteria(getRatingCriteria()); }
 export function saveRatingCriteria(criteria: RatingCriterion[]) { store.rating_criteria = normalizeRatingCriteria(criteria); persist(); return getRatingCriteria(); }
 export function getLoginUsers() { return store.users.filter((user) => user.active === 1).map(safeUser); }
 export function validateLogin(loginId: string, password: string) { const user = store.users.find((item) => item.login_id === loginId && item.active === 1); if (!user || !verifyPassword(password, user.password_hash)) return null; return safeUser(user); }
+export function assertValidNewPassword(password: string, confirmation?: string) { const value = String(password ?? ""); if (value.length < 6) throw new Error("password_too_short"); if (confirmation !== undefined && value !== confirmation) throw new Error("password_mismatch"); return value; }
+export function changeUserPassword(userId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.id === userId && item.active === 1); if (!user) throw new Error("user_not_found"); const nextPassword = assertValidNewPassword(password, confirmation); user.password_hash = hashPassword(nextPassword); user.pin = undefined; persist(); return { ok: true }; }
+export function changeStaffPassword(staffId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff" && item.active === 1); if (!user) throw new Error("user_not_found"); return changeUserPassword(user.id, password, confirmation); }
+export function changeDirectorPassword(password: string, confirmation?: string) { const user = store.users.find((item) => isDirectorRole(item.role) && item.active === 1); if (!user) throw new Error("user_not_found"); return changeUserPassword(user.id, password, confirmation); }
 export function resetStaffPassword(staffId: number) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff"); if (!user) throw new Error("User not found"); user.password_hash = hashPassword(defaultStaffPassword); user.pin = undefined; persist(); return { ok: true }; }
 export function getStaffById(id: number) { return store.staff.find((staff) => staff.id === id && staff.active === 1); }
 function enrichStaff(staff: Staff): Staff {
@@ -507,9 +611,11 @@ export function getEvaluationsForStaffSelf(staffId: number): Evaluation[] { retu
 export function getEvaluation(id: number): Evaluation | undefined { const evaluation = store.evaluations.find((item) => item.id === id); return evaluation ? withStaffName(evaluation) : undefined; }
 export function getEvaluationScores(evaluationId: number): EvaluationScore[] { return store.evaluation_scores.filter((score) => score.evaluation_id === evaluationId).map(({ evaluation_id, item_id, score, comment, not_applicable, section_name, item_name, criteria, item_order }) => ({ evaluation_id, item_id, score, comment, not_applicable: not_applicable ? 1 : 0, section_name, item_name, criteria, item_order })); }
 export function deleteEvaluation(id: number) { const exists = store.evaluations.some((evaluation) => evaluation.id === id); if (!exists) return false; store.evaluations = store.evaluations.filter((evaluation) => evaluation.id !== id); store.evaluation_scores = store.evaluation_scores.filter((score) => score.evaluation_id !== id); persist(); return true; }
-export function createEvaluation(input: { staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month: string; entry_date: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; is_360?: number }) {
+export function createEvaluation(input: { staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month?: string; entry_date: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; is_360?: number; evaluation_cycle_id?: number | null }) {
+  const cycle = input.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === input.evaluation_cycle_id) : getActiveCycleInternal();
+  const evaluationMonth = input.evaluation_month || cycleMonth(cycle);
   const items = getEvaluationItemsForStaff(input.staff_id); const summary = calculateSummary(items, []); const timestamp = now(); const evaluationId = store.nextIds.evaluation++;
-  store.evaluations.push({ id: evaluationId, staff_id: input.staff_id, evaluator_name: input.evaluator_name, evaluation_type: input.evaluation_type, evaluation_month: input.evaluation_month, entry_date: input.entry_date, total_score: summary.totalScore, max_score: summary.maxScore, average_score: summary.averageScore, rank: summary.rank, comments: "{}", created_at: timestamp, updated_at: timestamp, evaluator_user_id: input.evaluator_user_id ?? null, evaluator_staff_id: input.evaluator_staff_id ?? null, is_360: input.is_360 ? 1 : 0 });
+  store.evaluations.push({ id: evaluationId, staff_id: input.staff_id, evaluator_name: input.evaluator_name, evaluation_type: input.evaluation_type, evaluation_month: evaluationMonth, entry_date: input.entry_date, total_score: summary.totalScore, max_score: summary.maxScore, average_score: summary.averageScore, rank: summary.rank, comments: "{}", created_at: timestamp, updated_at: timestamp, evaluator_user_id: input.evaluator_user_id ?? null, evaluator_staff_id: input.evaluator_staff_id ?? null, is_360: input.is_360 ? 1 : 0, evaluation_cycle_id: cycle?.id ?? null });
   for (const item of items) store.evaluation_scores.push({ id: store.nextIds.score++, evaluation_id: evaluationId, item_id: item.id, score: null, comment: "", not_applicable: 0, ...snapshotItem(item) });
   persist(); return evaluationId;
 }
@@ -528,12 +634,14 @@ export function updateEvaluation(id: number, payload: { scores: Array<{ item_id:
 
 function currentEvaluationMonth() { return new Date().toISOString().slice(0, 7); }
 function currentEntryDate() { return new Date().toISOString().slice(0, 10); }
-function get360EvaluationType(user: CurrentUser, staffId: number): EvaluationType { if (user.role === "director") return "director"; return user.staff_id === staffId ? "self" : "peer"; }
-function find360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth()) { return store.evaluations.find((evaluation) => evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id && evaluation.staff_id === staffId && evaluation.evaluation_month === month); }
-export function getOrCreate360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), entryDate = currentEntryDate()) {
-  const existing = find360Evaluation(user, staffId, month);
+function get360EvaluationType(user: CurrentUser, staffId: number): EvaluationType { if (isDirectorRole(user.role)) return "director"; return user.staff_id === staffId ? "self" : "peer"; }
+function find360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), cycleId: number | null = getActiveCycleInternal()?.id ?? null) { return store.evaluations.find((evaluation) => evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id && evaluation.staff_id === staffId && ((cycleId && evaluation.evaluation_cycle_id === cycleId) || (!evaluation.evaluation_cycle_id && evaluation.evaluation_month === month))); }
+export function getOrCreate360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), entryDate = currentEntryDate(), cycleId = getActiveCycleInternal()?.id ?? null) {
+  const cycle = cycleId ? store.evaluation_cycles.find((item) => item.id === cycleId) : getActiveCycleInternal();
+  const evaluationMonth = cycle ? cycleMonth(cycle) : month;
+  const existing = find360Evaluation(user, staffId, evaluationMonth, cycle?.id ?? null);
   if (existing) return existing.id;
-  return createEvaluation({ staff_id: staffId, evaluator_name: user.name, evaluation_type: get360EvaluationType(user, staffId), evaluation_month: month, entry_date: entryDate, evaluator_user_id: user.id, evaluator_staff_id: user.staff_id, is_360: 1 });
+  return createEvaluation({ staff_id: staffId, evaluator_name: user.name, evaluation_type: get360EvaluationType(user, staffId), evaluation_month: evaluationMonth, entry_date: entryDate, evaluator_user_id: user.id, evaluator_staff_id: user.staff_id, is_360: 1, evaluation_cycle_id: cycle?.id ?? null });
 }
 function is360EvaluationComplete(evaluation: Evaluation) {
   const scores = store.evaluation_scores.filter((score) => score.evaluation_id === evaluation.id);
@@ -579,8 +687,8 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
   }
   return Array.from(groups.values()).map((item) => ({ item_id: item.item_id, item_name: item.item_name, section_name: item.section_name, item_order: item.item_order, average: item.count ? item.total / item.count : null, count: item.count }));
 }
-export function get360Summary(month = currentEvaluationMonth()) {
-  const all = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && evaluation.evaluation_month === month).map(withStaffName);
+export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
+  const all = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && (cycleId ? evaluation.evaluation_cycle_id === cycleId : evaluation.evaluation_month === month)).map(withStaffName);
   const globalItemAverages = buildGlobalItemAverages(all);
   const globalAverageByItem = new Map(globalItemAverages.map((item) => [item.item_id, item.average]));
   const rows = getAllStaffList().map((staff) => {
@@ -624,25 +732,29 @@ export function get360Summary(month = currentEvaluationMonth()) {
   return { staff_summaries: rows, item_rankings: globalItemAverages, theme_rankings: globalThemeAverages };
 }
 
+export function get360SummaryForCycle(cycleId: number) {
+  const cycle = store.evaluation_cycles.find((item) => item.id === cycleId);
+  return { cycle: cycle ?? null, ...get360Summary(cycleMonth(cycle), cycleId) };
+}
+
 export function getStaffGrowthSummary(staffId: number) {
   const staff = store.staff.find((person) => person.id === staffId);
   if (!staff) return null;
-  const months = available360MonthsForStaff(staffId);
-  const month = months[0] ?? currentEvaluationMonth();
-  const previousMonth = months[1] ?? null;
-  const evaluations = evaluationsForStaffMonth(staffId, month);
-  const previousEvaluations = previousMonth ? evaluationsForStaffMonth(staffId, previousMonth) : [];
-  const overall_average = overallAverageForEvaluations(evaluations);
-  const previous_overall_average = previousEvaluations.length ? overallAverageForEvaluations(previousEvaluations) : null;
-  const previousThemeMap = themeAverageMap(previousEvaluations);
-  const themes = themeAveragesForEvaluations(evaluations).map((item) => {
-    const previous = previousThemeMap.get(item.theme) ?? null;
-    return { ...item, previous_average: previous, change: diff(item.average, previous) };
+  const history = getStaffEvaluationHistory(staffId);
+  const current = history[0];
+  const previous = history[1] ?? null;
+  if (!current) {
+    const cycle = getActiveCycleInternal();
+    const themes = evaluationThemes.map((theme) => ({ theme, average: null, previous_average: null, change: null }));
+    return { staff: enrichStaff(staff), month: cycle?.name ?? currentEvaluationMonth(), cycle, previous_month: null, overall_average: null, previous_overall_average: null, overall_change: null, themes, strengths: [], improvements: [], self_comments: "{}" };
+  }
+  const previousThemeMap = new Map((previous?.themes ?? []).map((item) => [item.theme, item.average]));
+  const themes = current.themes.map((item) => {
+    const previousAverage = previousThemeMap.get(item.theme) ?? null;
+    return { ...item, previous_average: previousAverage, change: diff(item.average, previousAverage) };
   });
-  const ranked = themes.filter((item) => item.average !== null) as Array<{ theme: EvaluationTheme; average: number; previous_average: number | null; change: number | null }>;
-  const strengths = [...ranked].sort((a, b) => b.average - a.average).slice(0, 3);
-  const improvements = [...ranked].sort((a, b) => a.average - b.average).slice(0, 3);
-  return { staff: enrichStaff(staff), month, previous_month: previousMonth, overall_average, previous_overall_average, overall_change: diff(overall_average, previous_overall_average), themes, strengths, improvements, self_comments: commentsForSelfEvaluation(evaluations) };
+  const previousOverall = previous?.overall_average ?? null;
+  return { staff: current.staff, month: current.cycle.name, cycle: current.cycle, previous_month: previous?.cycle.name ?? null, overall_average: current.overall_average, previous_overall_average: previousOverall, overall_change: diff(current.overall_average, previousOverall), themes, strengths: current.strengths, improvements: current.improvements, self_comments: current.self_comments };
 }
 
 export function getPreviousComparison(evaluationId: number) {

@@ -1,4 +1,5 @@
 "use client";
+import { isDirectorRole } from "@/lib/permissions";
 import { FormEvent, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { CurrentUser, Staff } from "@/lib/types";
@@ -8,7 +9,7 @@ export function NewEvaluationForm({ staff, user }: { staff: Staff[]; user: Curre
   const search = useSearchParams();
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
-  const isDirector = user.role === "director";
+  const isDirector = isDirectorRole(user.role);
   const selectedStaffId = isDirector ? (search.get("staff") ?? staff[0]?.id) : user.staff_id;
   const [saving, setSaving] = useState(false);
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
