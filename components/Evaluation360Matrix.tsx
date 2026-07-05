@@ -125,7 +125,16 @@ export function Evaluation360Matrix({ user, items, targets, afterSavePath = "/36
           const canSkip = target.evaluation.evaluation_type !== "self";
           return { item_id: item.id, score: value.not_applicable && canSkip ? null : value.score, comment: "", not_applicable: value.not_applicable && canSkip ? 1 : 0 };
         });
-        const body: { scores: typeof scores; comments?: Record<string, string> } = { scores };
+        const body: { scores: typeof scores; comments?: Record<string, string>; staff_id: number; evaluator_name: string; evaluation_type: Evaluation["evaluation_type"]; evaluation_month: string; entry_date: string; evaluation_cycle_id?: number | null; is_360: number } = {
+          scores,
+          staff_id: target.staff.id,
+          evaluator_name: target.evaluation.evaluator_name || user.name,
+          evaluation_type: target.evaluation.evaluation_type,
+          evaluation_month: target.evaluation.evaluation_month,
+          entry_date: target.evaluation.entry_date,
+          evaluation_cycle_id: target.evaluation.evaluation_cycle_id ?? null,
+          is_360: 1,
+        };
         if (target.evaluation.evaluation_type === "self") {
           const comments = { ...(target.comments ?? {}) };
           for (const field of selfCommentFields) comments[field] = selfComments[field] ?? "";
@@ -134,9 +143,19 @@ export function Evaluation360Matrix({ user, items, targets, afterSavePath = "/36
         const response = await fetch("/api/evaluations/" + target.evaluation.id, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const data = await response.json().catch(() => null);
         if (!response.ok) {
-          const error = data?.error || "保存できませんでした";
-          console.error("save evaluation failed", { status: response.status, ok: response.ok, data, error });
-          throw new Error(error);
+          if (response.status === 404 && (data?.reason === "evaluation_not_found" || data?.error === "evaluation_not_found")) {
+            const createResponse = await fetch("/api/evaluations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+            const createData = await createResponse.json().catch(() => null);
+            if (!createResponse.ok) {
+              const createError = createData?.error || "保存できませんでした";
+              console.error("save evaluation failed", { status: createResponse.status, ok: createResponse.ok, data: createData, error: createError });
+              throw new Error(createError);
+            }
+          } else {
+            const error = data?.error || "保存できませんでした";
+            console.error("save evaluation failed", { status: response.status, ok: response.ok, data, error });
+            throw new Error(error);
+          }
         }
       }
       setSaveMessage("保存しました");

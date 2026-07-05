@@ -93,15 +93,32 @@ export function EvaluationEditor({ evaluation, items, scores, comments, user, ra
     const payload = {
       scores: items.map((item) => ({ item_id: item.id, score: scoreValues[item.id] ?? null, comment: "", not_applicable: allowNotApplicable && notApplicableValues[item.id] ? 1 : 0 })),
       comments: commentValues,
+      staff_id: evaluation.staff_id,
+      evaluator_name: evaluation.evaluator_name || user.name,
+      evaluation_type: evaluation.evaluation_type,
+      evaluation_month: evaluation.evaluation_month,
+      entry_date: evaluation.entry_date,
+      evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null,
+      is_360: evaluation.is_360 ?? 0,
     };
     try {
       const response = await fetch("/api/evaluations/" + evaluation.id, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        const data = await response.json().catch(() => null);
-        if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (response.status === 404 && (data?.reason === "evaluation_not_found" || data?.error === "evaluation_not_found")) {
+          const createResponse = await fetch("/api/evaluations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          const createData = await createResponse.json().catch(() => null);
+          if (!createResponse.ok) {
+            const createError = createData?.error || "保存できませんでした";
+            console.error("save evaluation failed", { status: createResponse.status, ok: createResponse.ok, data: createData, error: createError });
+            throw new Error(createError);
+          }
+        } else {
           const error = data?.error || "保存できませんでした";
           console.error("save evaluation failed", { status: response.status, ok: response.ok, data, error });
           throw new Error(error);
         }
+      }
       setSaveMessage("保存しました");
       try {
         router.push(afterSavePath ?? "/evaluations/" + evaluation.id);

@@ -50,7 +50,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       evaluatorStaffIdMatches,
       is360,
     });
-    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+    if (reason === "evaluation_not_found") return NextResponse.json({ success: false, error: "evaluation_not_found", reason }, { status: 404 });
+    return NextResponse.json({ success: false, error: "Forbidden", reason }, { status: 403 });
   }
   const body = await request.json();
   try {
