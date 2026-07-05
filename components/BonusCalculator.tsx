@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, Save } from "lucide-react";
+import { Download, RotateCcw, Save } from "lucide-react";
 import { calculateBonusAdjustment, ratePercentToMultiplier } from "@/lib/bonusAdjustment";
 
 type BonusStaff = {
@@ -14,10 +14,12 @@ type BonusStaff = {
 };
 
 type CalculationMode = "base" | "pool";
+type BaseBonusMode = "auto" | "manual";
 
 type RowInput = {
   baseSalary: string;
   baseBonus: string;
+  baseBonusMode: BaseBonusMode;
   employmentAdjustmentRate: string;
   workHoursAdjustmentRate: string;
   attendanceAdjustmentRate: string;
@@ -34,8 +36,8 @@ type Props = {
   staff: BonusStaff[];
 };
 
-const storageKey = "yumemirai_bonus_calculator_v4";
-const legacyStorageKeys = ["yumemirai_bonus_calculator_v3", "yumemirai_bonus_calculator_v2"];
+const storageKey = "yumemirai_bonus_calculator_v5";
+const legacyStorageKeys = ["yumemirai_bonus_calculator_v4", "yumemirai_bonus_calculator_v3", "yumemirai_bonus_calculator_v2"];
 const percentageOptions = [50, 60, 70, 80, 90, 100, 110, 120];
 
 function yen(value: number) {
@@ -69,6 +71,7 @@ function defaultRowInput(): RowInput {
   return {
     baseSalary: "",
     baseBonus: "",
+    baseBonusMode: "auto",
     employmentAdjustmentRate: "100",
     workHoursAdjustmentRate: "100",
     attendanceAdjustmentRate: "100",
@@ -86,9 +89,12 @@ function legacyMinusRateToPercent(input?: LegacyRowInput) {
 function normalizeRowInput(input?: LegacyRowInput): RowInput {
   const fallback = defaultRowInput();
   const legacyAttendanceRate = legacyMinusRateToPercent(input);
+  const baseBonus = input?.baseBonus ?? fallback.baseBonus;
+  const baseBonusMode = input?.baseBonusMode === "manual" || input?.baseBonusMode === "auto" ? input.baseBonusMode : (baseBonus ? "manual" : "auto");
   return {
     baseSalary: input?.baseSalary ?? fallback.baseSalary,
-    baseBonus: input?.baseBonus ?? fallback.baseBonus,
+    baseBonus,
+    baseBonusMode,
     employmentAdjustmentRate: input?.employmentAdjustmentRate ?? fallback.employmentAdjustmentRate,
     workHoursAdjustmentRate: input?.workHoursAdjustmentRate ?? fallback.workHoursAdjustmentRate,
     attendanceAdjustmentRate: input?.attendanceAdjustmentRate ?? legacyAttendanceRate ?? fallback.attendanceAdjustmentRate,
@@ -159,26 +165,37 @@ export function BonusCalculator({ staff }: Props) {
   }, [staff]);
 
   const calculated = useMemo(() => {
-    const baseRows = staff.map((person) => {
+    const preparedRows = staff.map((person) => {
       const input = normalizeRowInput(rows[String(person.id)]);
-      const baseBonus = numberValue(input.baseBonus);
       const coefficient = evaluationCoefficient(person.bonusScore);
+      const employmentMultiplier = ratePercentToMultiplier(numberValue(input.employmentAdjustmentRate));
+      const workHoursMultiplier = ratePercentToMultiplier(numberValue(input.workHoursAdjustmentRate));
+      const attendanceMultiplier = ratePercentToMultiplier(numberValue(input.attendanceAdjustmentRate));
+      const individualAdjustmentAmount = numberValue(input.individualAdjustmentAmount);
+      const overallMultiplier = employmentMultiplier * workHoursMultiplier * attendanceMultiplier;
+      const weight = coefficient * overallMultiplier;
+      return { person, input, coefficient, employmentMultiplier, workHoursMultiplier, attendanceMultiplier, individualAdjustmentAmount, overallMultiplier, weight };
+    });
+
+    const suggestedFinalBonuses = mode === "pool"
+      ? distributeTotal(numberValue(totalPool), preparedRows.map((row) => row.weight), preparedRows.map((row) => row.individualAdjustmentAmount))
+      : preparedRows.map(() => 0);
+
+    return preparedRows.map((row, index) => {
+      const suggestedFinalBonus = suggestedFinalBonuses[index] ?? 0;
+      const suggestedBaseBonus = row.weight > 0 ? Math.max(0, (suggestedFinalBonus - row.individualAdjustmentAmount) / row.weight) : 0;
+      const usesAutoBaseBonus = mode === "pool" && row.input.baseBonusMode !== "manual";
+      const baseBonus = usesAutoBaseBonus ? suggestedBaseBonus : numberValue(row.input.baseBonus);
       const adjustment = calculateBonusAdjustment({
         baseBonus,
-        evaluationMultiplier: coefficient,
-        employmentMultiplier: ratePercentToMultiplier(numberValue(input.employmentAdjustmentRate)),
-        workHoursMultiplier: ratePercentToMultiplier(numberValue(input.workHoursAdjustmentRate)),
-        attendanceMultiplier: ratePercentToMultiplier(numberValue(input.attendanceAdjustmentRate)),
-        individualAdjustmentAmount: numberValue(input.individualAdjustmentAmount),
+        evaluationMultiplier: row.coefficient,
+        employmentMultiplier: row.employmentMultiplier,
+        workHoursMultiplier: row.workHoursMultiplier,
+        attendanceMultiplier: row.attendanceMultiplier,
+        individualAdjustmentAmount: row.individualAdjustmentAmount,
       });
-      const weight = coefficient * adjustment.overallMultiplier;
-      return { person, input, baseBonus, coefficient, adjustment, weight, finalBonus: adjustment.finalBonus };
+      return { ...row, baseBonus, suggestedBaseBonus, suggestedFinalBonus, usesAutoBaseBonus, adjustment, finalBonus: adjustment.finalBonus };
     });
-    if (mode === "pool") {
-      const distributed = distributeTotal(numberValue(totalPool), baseRows.map((row) => row.weight), baseRows.map((row) => row.adjustment.individualAdjustmentAmount));
-      return baseRows.map((row, index) => ({ ...row, finalBonus: distributed[index] ?? 0 }));
-    }
-    return baseRows;
   }, [staff, rows, mode, totalPool]);
 
   const totalBonus = calculated.reduce((sum, row) => sum + row.finalBonus, 0);
@@ -188,13 +205,21 @@ export function BonusCalculator({ staff }: Props) {
     setSavedMessage("");
   }
 
+  function updateBaseBonus(id: number, value: string) {
+    update(id, { baseBonus: value, baseBonusMode: "manual" });
+  }
+
+  function resetBaseBonusToAuto(id: number) {
+    update(id, { baseBonus: "", baseBonusMode: "auto" });
+  }
+
   function saveLocal() {
     window.localStorage.setItem(storageKey, JSON.stringify({ rows, mode, totalPool }));
     setSavedMessage("この端末に保存しました。");
   }
 
   function exportCsv() {
-    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "基準賞与額", "評価反映後", "最終賞与額", "メモ"];
+    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "自動配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "最終賞与額", "メモ"];
     const body = calculated.map((row) => [
       mode === "base" ? "基準賞与から計算" : "総賞与額から自動配分",
       row.person.name,
@@ -203,18 +228,20 @@ export function BonusCalculator({ staff }: Props) {
       row.person.averageScore === null ? "" : row.person.averageScore.toFixed(2),
       row.person.standardizedScore === null ? "" : row.person.standardizedScore.toFixed(2),
       row.person.bonusScore === null ? "" : row.person.bonusScore.toFixed(2),
+      row.usesAutoBaseBonus ? "自動配分" : "個別上書き",
+      Math.round(row.suggestedBaseBonus),
+      Math.round(row.baseBonus),
       percent(row.adjustment.evaluationMultiplier),
       percent(row.adjustment.employmentMultiplier),
       percent(row.adjustment.workHoursMultiplier),
       percent(row.adjustment.attendanceMultiplier),
       percent(row.adjustment.overallMultiplier),
       row.adjustment.individualAdjustmentAmount,
-      row.baseBonus,
       Math.round(row.adjustment.evaluationAdjustedBonus),
       Math.round(row.finalBonus),
       row.input.memo,
     ]);
-    const csv = [header, ...body, ["合計", "", "", "", "", "", "", "", "", "", "", "", "", "", "", Math.round(totalBonus), ""]].map((line) => line.map(escapeCsv).join(",")).join("\n");
+    const csv = [header, ...body, ["合計", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", Math.round(totalBonus), ""]].map((line) => line.map(escapeCsv).join(",")).join("\n");
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -237,12 +264,12 @@ export function BonusCalculator({ staff }: Props) {
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">総賞与額</div>
           <input inputMode="numeric" value={totalPool} onChange={(event) => setTotalPool(event.target.value)} disabled={mode !== "pool"} className="mt-3 h-14 w-full rounded border border-slate-300 px-4 text-right text-xl font-bold disabled:bg-slate-100 disabled:text-slate-400" placeholder="例 4200000" />
-          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、最終賞与額の合計がこの金額と一致します。</p>
+          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、まず総賞与額から基準賞与の自動案を作成します。</p>
         </div>
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">合計賞与額</div>
           <div className="mt-2 text-3xl font-bold text-clinic">{yen(totalBonus)}</div>
-          <p className="mt-2 text-xs text-slate-500">{mode === "base" ? "基準賞与から計算した合計です。" : "総賞与額に一致するよう自動配分しています。"}</p>
+          <p className="mt-2 text-xs text-slate-500">{mode === "base" ? "入力した基準賞与から計算した合計です。" : "自動配分案または個別上書き後の合計です。"}</p>
         </div>
       </section>
 
@@ -250,8 +277,8 @@ export function BonusCalculator({ staff }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold">賞与計算表</h2>
-            <p className="mt-1 text-sm text-slate-600">総合補正を雇用形態・勤務時間・出勤日数・個別調整に分けて管理します。</p>
-            <p className="mt-1 text-sm text-slate-600">パート勤務や時短勤務など、勤務実態に応じた反映率をスタッフごとに調整できます。</p>
+            <p className="mt-1 text-sm text-slate-600">自動配分モードでも、スタッフごとの基準賞与額を個別に上書きできます。</p>
+            <p className="mt-1 text-sm text-slate-600">基準賞与額を上書きすると、その金額をもとに評価反映後・総合補正・個別調整後・最終賞与を再計算します。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={saveLocal} className="flex min-h-12 items-center gap-2 rounded border border-clinic px-5 py-3 font-bold text-clinic"><Save size={18} />この端末に保存</button>
@@ -268,6 +295,7 @@ export function BonusCalculator({ staff }: Props) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-xl font-bold text-ink">{row.person.name}</h3>
                     <span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{row.person.role}</span>
+                    {mode === "pool" ? <span className={(row.usesAutoBaseBonus ? "bg-mint text-clinic" : "bg-amber-50 text-amber-700") + " rounded px-3 py-1 text-sm font-bold"}>{row.usesAutoBaseBonus ? "自動配分" : "個別上書き"}</span> : null}
                   </div>
                   <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
                     <span>評価平均: <b>{row.person.averageScore === null ? "-" : row.person.averageScore.toFixed(2)}</b></span>
@@ -281,9 +309,16 @@ export function BonusCalculator({ staff }: Props) {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 lg:grid-cols-[160px_160px_1fr_180px]">
+              <div className="mt-4 grid gap-3 lg:grid-cols-[160px_220px_1fr_180px]">
                 <label className="space-y-1"><span className="text-sm font-bold text-slate-600">基本給</span><input inputMode="numeric" value={row.input.baseSalary} onChange={(event) => update(row.person.id, { baseSalary: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 250000" /></label>
-                <label className="space-y-1"><span className="text-sm font-bold text-slate-600">基準賞与額</span><input inputMode="numeric" value={row.input.baseBonus} onChange={(event) => update(row.person.id, { baseBonus: event.target.value })} disabled={mode !== "base"} className="h-12 w-full rounded border border-slate-300 px-3 text-right disabled:bg-slate-100 disabled:text-slate-400" placeholder="例 300000" /></label>
+                <label className="space-y-1">
+                  <span className="text-sm font-bold text-slate-600">基準賞与額</span>
+                  <div className="flex gap-2">
+                    <input inputMode="numeric" value={mode === "pool" && row.usesAutoBaseBonus ? String(Math.round(row.suggestedBaseBonus)) : row.input.baseBonus} onChange={(event) => updateBaseBonus(row.person.id, event.target.value)} className="h-12 min-w-0 flex-1 rounded border border-slate-300 px-3 text-right" placeholder="例 300000" />
+                    {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="自動配分案に戻す"><RotateCcw size={18} /></button> : null}
+                  </div>
+                  {mode === "pool" ? <span className="block text-xs text-slate-500">自動配分案: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
+                </label>
                 <div className="grid gap-2 rounded bg-mint/60 p-3 text-sm md:grid-cols-4">
                   <div><div className="text-slate-600">基本賞与</div><b>{yen(row.baseBonus)}</b></div>
                   <div><div className="text-slate-600">評価反映後</div><b>{yen(row.adjustment.evaluationAdjustedBonus)}</b></div>
