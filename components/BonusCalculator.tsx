@@ -112,22 +112,15 @@ function normalizeRows(rows?: Record<string, LegacyRowInput>) {
   return Object.fromEntries(Object.entries(rows).map(([id, row]) => [id, normalizeRowInput(row)])) as Record<string, RowInput>;
 }
 
-function distributeTotal(total: number, weights: number[], fixedAdjustments: number[]) {
-  if (!total || !weights.length) return weights.map(() => 0);
-  const fixedTotal = fixedAdjustments.reduce((sum, value) => sum + value, 0);
-  const distributableTotal = Math.max(0, Math.round(total - fixedTotal));
-  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
-  if (totalWeight <= 0) return weights.map((_, index) => Math.max(0, fixedAdjustments[index] ?? 0));
-  const raw = weights.map((weight, index) => (distributableTotal * weight) / totalWeight + (fixedAdjustments[index] ?? 0));
-  const rounded = raw.map((value) => Math.floor(value));
-  let remainder = Math.round(total) - rounded.reduce((sum, value) => sum + value, 0);
-  const order = raw.map((value, index) => ({ index, fraction: value - Math.floor(value) })).sort((a, b) => b.fraction - a.fraction);
-  for (const item of order) {
-    if (remainder <= 0) break;
-    rounded[item.index] += 1;
-    remainder -= 1;
-  }
-  return rounded;
+function distributeEvenly(total: number, count: number) {
+  if (!total || count <= 0) return [] as number[];
+  const base = Math.floor(total / count);
+  let remainder = Math.round(total) - base * count;
+  return Array.from({ length: count }, () => {
+    const value = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+    return value;
+  });
 }
 
 function RateSelect({ id, value, onChange, label }: { id: string; value: string; onChange: (value: string) => void; label: string }) {
@@ -172,18 +165,13 @@ export function BonusCalculator({ staff }: Props) {
       const workHoursMultiplier = ratePercentToMultiplier(numberValue(input.workHoursAdjustmentRate));
       const attendanceMultiplier = ratePercentToMultiplier(numberValue(input.attendanceAdjustmentRate));
       const individualAdjustmentAmount = numberValue(input.individualAdjustmentAmount);
-      const overallMultiplier = employmentMultiplier * workHoursMultiplier * attendanceMultiplier;
-      const weight = coefficient * overallMultiplier;
-      return { person, input, coefficient, employmentMultiplier, workHoursMultiplier, attendanceMultiplier, individualAdjustmentAmount, overallMultiplier, weight };
+      return { person, input, coefficient, employmentMultiplier, workHoursMultiplier, attendanceMultiplier, individualAdjustmentAmount };
     });
 
-    const suggestedFinalBonuses = mode === "pool"
-      ? distributeTotal(numberValue(totalPool), preparedRows.map((row) => row.weight), preparedRows.map((row) => row.individualAdjustmentAmount))
-      : preparedRows.map(() => 0);
+    const autoBaseBonuses = mode === "pool" ? distributeEvenly(numberValue(totalPool), preparedRows.length) : preparedRows.map(() => 0);
 
     return preparedRows.map((row, index) => {
-      const suggestedFinalBonus = suggestedFinalBonuses[index] ?? 0;
-      const suggestedBaseBonus = row.weight > 0 ? Math.max(0, (suggestedFinalBonus - row.individualAdjustmentAmount) / row.weight) : 0;
+      const suggestedBaseBonus = autoBaseBonuses[index] ?? 0;
       const usesAutoBaseBonus = mode === "pool" && row.input.baseBonusMode !== "manual";
       const baseBonus = usesAutoBaseBonus ? suggestedBaseBonus : numberValue(row.input.baseBonus);
       const adjustment = calculateBonusAdjustment({
@@ -194,7 +182,7 @@ export function BonusCalculator({ staff }: Props) {
         attendanceMultiplier: row.attendanceMultiplier,
         individualAdjustmentAmount: row.individualAdjustmentAmount,
       });
-      return { ...row, baseBonus, suggestedBaseBonus, suggestedFinalBonus, usesAutoBaseBonus, adjustment, finalBonus: adjustment.finalBonus };
+      return { ...row, baseBonus, suggestedBaseBonus, usesAutoBaseBonus, adjustment, finalBonus: adjustment.finalBonus };
     });
   }, [staff, rows, mode, totalPool]);
 
@@ -219,7 +207,7 @@ export function BonusCalculator({ staff }: Props) {
   }
 
   function exportCsv() {
-    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "自動配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "最終賞与額", "メモ"];
+    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "均等配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "最終賞与額", "メモ"];
     const body = calculated.map((row) => [
       mode === "base" ? "基準賞与から計算" : "総賞与額から自動配分",
       row.person.name,
@@ -264,12 +252,12 @@ export function BonusCalculator({ staff }: Props) {
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">総賞与額</div>
           <input inputMode="numeric" value={totalPool} onChange={(event) => setTotalPool(event.target.value)} disabled={mode !== "pool"} className="mt-3 h-14 w-full rounded border border-slate-300 px-4 text-right text-xl font-bold disabled:bg-slate-100 disabled:text-slate-400" placeholder="例 4200000" />
-          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、まず総賞与額から基準賞与の自動案を作成します。</p>
+          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、総賞与額を対象スタッフ数で均等配分し、基準賞与額に反映します。</p>
         </div>
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">合計賞与額</div>
           <div className="mt-2 text-3xl font-bold text-clinic">{yen(totalBonus)}</div>
-          <p className="mt-2 text-xs text-slate-500">{mode === "base" ? "入力した基準賞与から計算した合計です。" : "自動配分案または個別上書き後の合計です。"}</p>
+          <p className="mt-2 text-xs text-slate-500">{mode === "base" ? "入力した基準賞与から計算した合計です。" : "均等配分された基準賞与または個別上書き後の合計です。"}</p>
         </div>
       </section>
 
@@ -315,9 +303,9 @@ export function BonusCalculator({ staff }: Props) {
                   <span className="text-sm font-bold text-slate-600">基準賞与額</span>
                   <div className="flex gap-2">
                     <input inputMode="numeric" value={mode === "pool" && row.usesAutoBaseBonus ? String(Math.round(row.suggestedBaseBonus)) : row.input.baseBonus} onChange={(event) => updateBaseBonus(row.person.id, event.target.value)} className="h-12 min-w-0 flex-1 rounded border border-slate-300 px-3 text-right" placeholder="例 300000" />
-                    {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="自動配分案に戻す"><RotateCcw size={18} /></button> : null}
+                    {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="均等配分額に戻す"><RotateCcw size={18} /></button> : null}
                   </div>
-                  {mode === "pool" ? <span className="block text-xs text-slate-500">自動配分案: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
+                  {mode === "pool" ? <span className="block text-xs text-slate-500">均等配分額: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
                 </label>
                 <div className="grid gap-2 rounded bg-mint/60 p-3 text-sm md:grid-cols-4">
                   <div><div className="text-slate-600">基本賞与</div><b>{yen(row.baseBonus)}</b></div>
