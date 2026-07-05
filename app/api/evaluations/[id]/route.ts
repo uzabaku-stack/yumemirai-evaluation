@@ -11,9 +11,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const evaluation = getEvaluation(Number(id));
   const canEdit = evaluation ? canEditEvaluation(user, evaluation) : false;
   if (!evaluation || !canEdit) {
+    const isSelfEvaluationForLoginStaff = evaluation ? evaluation.evaluation_type === "self" && evaluation.staff_id === user.staff_id : false;
+    const evaluatorUserIdMatches = evaluation ? evaluation.evaluator_user_id !== null && evaluation.evaluator_user_id !== undefined && evaluation.evaluator_user_id === user.id : false;
+    const evaluatorStaffIdMatches = evaluation ? evaluation.evaluator_staff_id !== null && evaluation.evaluator_staff_id !== undefined && user.staff_id !== null && evaluation.evaluator_staff_id === user.staff_id : false;
+    const is360 = evaluation ? evaluation.is_360 === 1 : false;
     console.error("[evaluations PUT forbidden]", {
       reason: !evaluation ? "evaluation_not_found" : "can_edit_evaluation_false",
-      requestedEvaluationId: Number(id),
       currentUser: user ? { id: user.id, login_id: user.login_id, name: user.name, role: user.role, staff_id: user.staff_id } : null,
       loginUser: user ? { id: user.id, login_id: user.login_id, role: user.role, staff_id: user.staff_id } : null,
       evaluation: evaluation ? {
@@ -31,13 +34,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       } : null,
       evaluator_user_id: evaluation?.evaluator_user_id ?? null,
       evaluator_staff_id: evaluation?.evaluator_staff_id ?? null,
-      checks: evaluation ? {
-        isDirectorRole: isDirectorRole(user.role),
-        isSelfEvaluationForLoginStaff: evaluation.evaluation_type === "self" && evaluation.staff_id === user.staff_id,
-        is360: evaluation.is_360 === 1,
-        evaluatorUserIdMatches: evaluation.evaluator_user_id !== null && evaluation.evaluator_user_id !== undefined && evaluation.evaluator_user_id === user.id,
-        evaluatorStaffIdMatches: evaluation.evaluator_staff_id !== null && evaluation.evaluator_staff_id !== undefined && user.staff_id !== null && evaluation.evaluator_staff_id === user.staff_id,
-      } : null,
+      isDirectorRole: isDirectorRole(user.role),
+      isSelfEvaluationForLoginStaff,
+      evaluatorUserIdMatches,
+      evaluatorStaffIdMatches,
+      is360,
     });
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
