@@ -735,7 +735,9 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
   return Array.from(groups.values()).map((item) => ({ item_id: item.item_id, item_name: item.item_name, section_name: item.section_name, item_order: item.item_order, average: item.count ? item.total / item.count : null, count: item.count }));
 }
 export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
-  const all = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && (cycleId ? evaluation.evaluation_cycle_id === cycleId : evaluation.evaluation_month === month)).map(withStaffName);
+  const rawEvaluations = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && (cycleId ? evaluation.evaluation_cycle_id === cycleId : evaluation.evaluation_month === month)).map(withStaffName);
+  const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && Number.isFinite(Number(evaluation.average_score)) && Number(evaluation.average_score) > 0).map((evaluation) => evaluation.staff_id));
+  const all = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
   const globalItemAverages = buildGlobalItemAverages(all);
   const globalAverageByItem = new Map(globalItemAverages.map((item) => [item.item_id, item.average]));
   const rows = getAllStaffList().map((staff) => {
