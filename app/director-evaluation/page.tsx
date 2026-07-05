@@ -63,8 +63,9 @@ export default async function DirectorEvaluationCommentPage({ searchParams }: { 
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ActionCard href="/director-evaluation?tab=director" icon={<MessageSquareText size={24} />} title="院長評価の入力・編集" description="スタッフごとの院長評価コメントを入力・編集します。" primary={tab === "director"} />
+        <ActionCard href="/evaluations/new" icon={<ClipboardList size={24} />} title="新規評価を作成" description="スタッフを選んで新しい評価シートを作成します。" />
         <ActionCard href="/360" icon={<UsersRound size={24} />} title="360°評価の確認・入力" description="横並び表形式で全スタッフの360°評価を入力します。" primary={tab === "360"} />
         <ActionCard href="/360/results" icon={<ClipboardList size={24} />} title="回答状況の確認" description="評価期間ごとの入力状況や結果を確認します。" primary={tab === "status"} />
       </section>
