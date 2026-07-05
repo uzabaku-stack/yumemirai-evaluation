@@ -11,5 +11,40 @@ export const metadata: Metadata = { title: "ゆめみらい業務評価アプリ
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
   if (!user) return <html lang="ja"><body>{children}</body></html>;
-  return <html lang="ja"><body><header className="no-print border-b border-teal-900/10 bg-white/85 backdrop-blur"><div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4"><Link href="/" className="flex items-center gap-3 text-xl font-bold text-ink"><span className="grid h-11 w-11 place-items-center rounded bg-clinic text-white"><ClipboardCheck size={24} /></span><span>ゆめみらい業務評価</span></Link><nav className="flex flex-wrap items-center gap-2 text-sm font-semibold"><Link className="rounded px-4 py-3 hover:bg-mint" href="/evaluations/new">{isDirectorRole(user.role) ? "新規評価" : "自己評価"}</Link>{isDirectorRole(user.role) ? <Link className="rounded px-4 py-3 hover:bg-mint" href="/staff">スタッフ</Link> : null}{isDirectorRole(user.role) ? <Link className="rounded px-4 py-3 hover:bg-mint" href="/evaluation-items">評価項目</Link> : null}{isDirectorRole(user.role) ? <Link className="rounded px-4 py-3 hover:bg-mint" href="/rating-criteria">評価基準</Link> : null}<span className="rounded bg-mint px-3 py-2 text-clinic">{user.name}</span><LogoutButton /></nav></div></header><main className="mx-auto max-w-6xl px-5 py-6">{children}</main></body></html>;
+
+  const isDirector = isDirectorRole(user.role);
+  const navItems = isDirector
+    ? [
+        { label: "新規評価", href: "/evaluations/new" },
+        { label: "評価管理", href: "/360" },
+        { label: "評価結果", href: "/360/results" },
+        { label: "賞与計算", href: "/bonus" },
+      ]
+    : [
+        { label: "360°評価", href: "/360" },
+        { label: "入力済み評価", href: "/my-evaluations" },
+      ];
+
+  return (
+    <html lang="ja">
+      <body>
+        <header className="no-print border-b border-teal-900/10 bg-white/85 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
+            <Link href="/" className="flex items-center gap-3 text-xl font-bold text-ink">
+              <span className="grid h-11 w-11 place-items-center rounded bg-clinic text-white"><ClipboardCheck size={24} /></span>
+              <span>ゆめみらい業務評価</span>
+            </Link>
+            <nav className="flex flex-wrap items-center justify-end gap-2 text-sm font-semibold">
+              {navItems.map((item) => (
+                <Link key={item.href} className="rounded px-4 py-3 hover:bg-mint" href={item.href}>{item.label}</Link>
+              ))}
+              <span className="rounded bg-mint px-3 py-2 text-clinic">{user.name}</span>
+              <LogoutButton />
+            </nav>
+          </div>
+        </header>
+        <main className="mx-auto max-w-6xl px-5 py-6">{children}</main>
+      </body>
+    </html>
+  );
 }

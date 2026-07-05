@@ -21,7 +21,7 @@ const directorCards: DirectorCard[] = [
   },
   {
     title: "評価管理",
-    description: "院長評価・360°評価・回答状況を管理します。",
+    description: "院長評価・360°評価・回答状況・評価の削除を管理します。",
     href: "/360",
     icon: ClipboardList,
     accent: true,
