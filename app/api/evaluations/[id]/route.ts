@@ -4,9 +4,29 @@ import { deleteEvaluation, getEvaluation, refreshStoreFromRemote, updateEvaluati
 import { isDirectorRole } from "@/lib/permissions";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  const { id } = await params;
+  const resolvedParams = await params;
+  console.error("evaluations PUT start", {
+    id: resolvedParams.id,
+    cookie: request.headers.get("cookie"),
+    authorization: request.headers.get("authorization"),
+  });
+  const currentUser = await getCurrentUser();
+  const loginUser = currentUser;
+  console.error("evaluations PUT auth", {
+    currentUser,
+    loginUser,
+  });
+  if (!currentUser) {
+    const reason = "current_user_missing";
+    console.error("evaluations PUT unauthorized", {
+      reason,
+      currentUser,
+      loginUser,
+    });
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+  const user = currentUser;
+  const { id } = resolvedParams;
   await refreshStoreFromRemote();
   const evaluation = getEvaluation(Number(id));
   const canEdit = evaluation ? canEditEvaluation(user, evaluation) : false;
