@@ -10,63 +10,45 @@ type DirectorCard = {
   href: string;
   icon: typeof Users;
   accent?: boolean;
-  links?: { label: string; href: string }[];
 };
 
 const directorCards: DirectorCard[] = [
   {
     title: "スタッフ管理",
-    description: "スタッフの登録・編集・職種・権限とパスワードを管理します。",
+    description: "スタッフ情報を管理します。",
     href: "/staff",
     icon: Users,
-    links: [{ label: "スタッフ一覧", href: "/staff" }],
   },
   {
     title: "評価管理",
-    description: "院長評価入力、360°評価、回答状況の確認をまとめて行います。",
+    description: "院長評価・360°評価・回答状況を管理します。",
     href: "/360",
     icon: ClipboardList,
     accent: true,
-    links: [
-      { label: "360°評価", href: "/360" },
-      { label: "院長評価", href: "/director-evaluation" },
-      { label: "評価回管理", href: "/evaluation-cycles" },
-    ],
   },
   {
     title: "評価結果",
-    description: "評価一覧、院長コメント、評価履歴、詳細確認を見ます。",
+    description: "評価結果と履歴を確認します。",
     href: "/360/results",
     icon: UserCheck,
-    links: [
-      { label: "結果一覧", href: "/360/results" },
-      { label: "評価履歴", href: "/evaluation-history" },
-    ],
   },
   {
     title: "賞与計算",
-    description: "評価標準化と総合補正を反映して賞与目安を計算します。",
+    description: "評価から賞与を自動計算します。",
     href: "/bonus",
     icon: CircleDollarSign,
-    links: [{ label: "賞与計算", href: "/bonus" }],
   },
   {
     title: "集計分析",
-    description: "評価傾向、ランキング、セクション別の分析を確認します。",
+    description: "評価傾向を分析します。",
     href: "/360/results",
     icon: BarChart3,
-    links: [{ label: "分析を見る", href: "/360/results" }],
   },
   {
     title: "設定",
-    description: "評価項目、評価基準、院長設定などシステム全体を整えます。",
+    description: "評価項目や各種設定を管理します。",
     href: "/evaluation-items",
     icon: Settings,
-    links: [
-      { label: "評価項目", href: "/evaluation-items" },
-      { label: "評価基準", href: "/rating-criteria" },
-      { label: "院長設定", href: "/settings" },
-    ],
   },
 ];
 
@@ -91,35 +73,28 @@ function DirectorHome() {
     <div className="space-y-6">
       <section className="rounded border border-teal-900/10 bg-white p-6 shadow-soft">
         <p className="text-sm font-bold text-clinic">院長ホーム</p>
-        <h1 className="mt-2 text-3xl font-bold text-ink">やりたいことから選ぶ</h1>
-        <p className="mt-2 text-slate-600">よく使う操作を6つに整理しました。管理、入力、確認、分析、設定をここから迷わず始められます。</p>
+        <h1 className="mt-2 text-3xl font-bold text-ink">院長ダッシュボード</h1>
+        <p className="mt-2 text-slate-600">業務評価・賞与計算・分析をここから管理します。</p>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {directorCards.map((card) => {
           const Icon = card.icon;
           return (
-            <article key={card.title} className={(card.accent ? "border-clinic/30 bg-mint/70" : "border-teal-900/10 bg-white") + " rounded border p-5 shadow-soft"}>
-              <Link href={card.href} className="group block rounded focus:outline-none focus:ring-2 focus:ring-clinic focus:ring-offset-2">
-                <div className="flex items-start justify-between gap-4">
-                  <div className={(card.accent ? "bg-clinic text-white" : "bg-slate-100 text-clinic") + " grid h-14 w-14 shrink-0 place-items-center rounded"}>
-                    <Icon size={28} />
-                  </div>
-                  <ChevronRight className="mt-3 text-slate-400 transition group-hover:translate-x-1 group-hover:text-clinic" />
+            <Link
+              key={card.title}
+              href={card.href}
+              className={(card.accent ? "border-clinic/30 bg-mint/70" : "border-teal-900/10 bg-white") + " group block min-h-56 rounded border p-6 shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-clinic focus:ring-offset-2"}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className={(card.accent ? "bg-clinic text-white" : "bg-slate-100 text-clinic") + " grid h-14 w-14 shrink-0 place-items-center rounded"}>
+                  <Icon size={28} />
                 </div>
-                <h2 className="mt-5 text-2xl font-bold text-ink">{card.title}</h2>
-                <p className="mt-2 min-h-12 text-sm leading-6 text-slate-600">{card.description}</p>
-              </Link>
-              {card.links?.length ? (
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-200 pt-4">
-                  {card.links.map((link) => (
-                    <Link key={link.href + link.label} href={link.href} className="rounded border border-clinic/20 bg-white px-3 py-2 text-sm font-bold text-clinic hover:bg-mint">
-                      {link.label}
-                    </Link>
-                  ))}
-                </div>
-              ) : null}
-            </article>
+                <ChevronRight className="mt-3 text-slate-400 transition group-hover:translate-x-1 group-hover:text-clinic" />
+              </div>
+              <h2 className="mt-6 text-2xl font-bold text-ink">{card.title}</h2>
+              <p className="mt-3 text-base leading-7 text-slate-600">{card.description}</p>
+            </Link>
           );
         })}
       </section>
