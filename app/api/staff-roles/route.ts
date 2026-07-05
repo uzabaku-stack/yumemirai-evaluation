@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const body = await request.json();
   try {
-    const role = createStaffRole({ name: String(body.name ?? "") });
+    const role = await createStaffRole({ name: String(body.name ?? "") });
     return NextResponse.json({ role });
   } catch (error) {
     return NextResponse.json({ message: error instanceof Error ? error.message : "保存できませんでした" }, { status: 400 });

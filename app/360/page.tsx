@@ -38,11 +38,11 @@ export default async function Evaluation360Page({ searchParams }: { searchParams
   const activeCycle = getActiveEvaluationCycle();
   const month = query.month || activeCycle?.startDate.slice(0, 7) || new Date().toISOString().slice(0, 7);
   if (!staff.length) return <div className="rounded border border-teal-900/10 bg-white p-6 shadow-soft">評価対象スタッフが登録されていません。</div>;
-  const targets = staff.map((person) => {
-    const evaluationId = getOrCreate360Evaluation(user, person.id, month, undefined, activeCycle?.id ?? null);
+  const targets = await Promise.all(staff.map(async (person) => {
+    const evaluationId = await getOrCreate360Evaluation(user, person.id, month, undefined, activeCycle?.id ?? null);
     const evaluation = getEvaluation(evaluationId);
     if (!evaluation) throw new Error("Evaluation not found");
     return { staff: person, evaluation, scores: getEvaluationScores(evaluation.id), comments: parseComments(evaluation.comments) };
-  });
+  }));
   return <div className="space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-3xl font-bold">{isDirectorRole(user.role) ? "院長評価入力" : "360°評価入力"}</h1><p className="mt-1 text-slate-600">評価者: {user.name}</p></div><Link href="/" className="rounded border border-clinic px-5 py-4 font-bold text-clinic">トップへ戻る</Link></div><RatingCriteriaAccordion text={evaluation360CriteriaText} />{query.saved === "1" ? <div className="rounded border border-teal-200 bg-mint px-5 py-4 font-bold text-clinic shadow-soft">評価を保存しました。</div> : null}<Evaluation360Matrix user={user} items={items} targets={targets} ratingCriteriaText={evaluation360CriteriaText} afterSavePath={"/360?month=" + month + "&saved=1"} /></div>;
 }

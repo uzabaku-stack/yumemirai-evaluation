@@ -10,12 +10,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = await request.json();
   if (body.reset_password) {
-    resetStaffPassword(Number(id));
+    await resetStaffPassword(Number(id));
     return NextResponse.json({ ok: true });
   }
   if (body.change_password) {
     try {
-      changeStaffPassword(Number(id), String(body.password ?? ""), String(body.password_confirmation ?? ""));
+      await changeStaffPassword(Number(id), String(body.password ?? ""), String(body.password_confirmation ?? ""));
       return NextResponse.json({ ok: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "password_error";
@@ -23,7 +23,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ message }, { status });
     }
   }
-  const staff = updateStaff(Number(id), { name: body.name, role: body.role, active: body.active });
+  const staff = await updateStaff(Number(id), { name: body.name, role: body.role, active: body.active });
   return NextResponse.json({ staff });
 }
 
@@ -32,7 +32,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const { id } = await params;
-  const result = deleteStaff(Number(id));
+  const result = await deleteStaff(Number(id));
   if (!result.deleted && result.reason === "has_evaluations") {
     return NextResponse.json({ message: "過去評価があるため、完全削除ではなく非表示を推奨します。" }, { status: 409 });
   }

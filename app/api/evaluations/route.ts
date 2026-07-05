@@ -13,6 +13,6 @@ export async function POST(request: Request) {
   const staffId = isDirectorRole(user.role) ? requestedStaffId : user.staff_id;
   const evaluationType = isDirectorRole(user.role) ? requestedType : "self";
   if (!staffId || !canCreateEvaluationFor(user, staffId, evaluationType)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-  const id = createEvaluation({ staff_id: staffId, evaluator_name: isDirectorRole(user.role) ? (body.evaluator_name || "") : user.name, evaluation_type: evaluationType, evaluation_month: body.evaluation_month || "", entry_date: body.entry_date || "" });
+  const id = await createEvaluation({ staff_id: staffId, evaluator_name: isDirectorRole(user.role) ? (body.evaluator_name || "") : user.name, evaluation_type: evaluationType, evaluation_month: body.evaluation_month || "", entry_date: body.entry_date || "" });
   return NextResponse.json({ id });
 }

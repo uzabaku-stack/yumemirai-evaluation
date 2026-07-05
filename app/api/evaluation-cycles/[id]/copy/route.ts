@@ -10,6 +10,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const body = await request.json();
-  const cycle = copyEvaluationCycle(Number(id), { name: String(body.name ?? ""), startDate: String(body.startDate ?? ""), endDate: String(body.endDate ?? ""), status: body.status as EvaluationCycleStatus });
+  const cycle = await copyEvaluationCycle(Number(id), { name: String(body.name ?? ""), startDate: String(body.startDate ?? ""), endDate: String(body.endDate ?? ""), status: body.status as EvaluationCycleStatus });
   return NextResponse.json({ cycle });
 }

@@ -10,6 +10,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const { id } = await params;
   const body = await request.json();
-  const cycle = updateEvaluationCycle(Number(id), { name: body.name, startDate: body.startDate, endDate: body.endDate, status: body.status as EvaluationCycleStatus });
+  const cycle = await updateEvaluationCycle(Number(id), { name: body.name, startDate: body.startDate, endDate: body.endDate, status: body.status as EvaluationCycleStatus });
   return NextResponse.json({ cycle });
 }

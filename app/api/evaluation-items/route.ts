@@ -16,5 +16,5 @@ export async function PUT(request: Request) {
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const body = await request.json();
   const items = Array.isArray(body.items) ? body.items : [];
-  return NextResponse.json({ items: saveEvaluationItems(items) });
+  return NextResponse.json({ items: await saveEvaluationItems(items) });
 }

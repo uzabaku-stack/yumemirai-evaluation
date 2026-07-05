@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { calculateSummary, defaultRatingCriteria, formatRatingCriteria } from "./scoring";
+import { isSupabaseConfigured, loadSupabaseAppData, saveSupabaseAppData, type SupabaseAppData } from "./supabase";
 import type { AppUser, CommentValues, CurrentUser, Evaluation, EvaluationCycle, EvaluationCycleStatus, EvaluationItem, EvaluationScore, EvaluationType, RatingCriterion, Staff, StaffRole } from "./types";
 import { isDirectorRole } from "@/lib/permissions";
 
@@ -319,7 +320,24 @@ function normalizeRatingCriteria(criteria: RatingCriterion[] | undefined): Ratin
   });
 }
 function createEmptyData(): AppData { return { nextIds: { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1 }, staff: [], users: [], evaluation_items: [], evaluations: [], evaluation_scores: [], rating_criteria: [], staff_roles: [], evaluation_cycles: [] }; }
-function saveData(data: AppData) { mkdirSync(dataDir, { recursive: true }); const tempFile = dataFile + ".tmp"; writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8"); renameSync(tempFile, dataFile); }
+function commentsSnapshot(data: AppData) {
+  return data.evaluations.map((evaluation) => ({ id: evaluation.id, evaluation_id: evaluation.id, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null, staff_id: evaluation.staff_id, evaluator_user_id: evaluation.evaluator_user_id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? null, evaluation_type: evaluation.evaluation_type, comments: evaluation.comments, updated_at: evaluation.updated_at }));
+}
+function toSupabaseAppData(data: AppData): SupabaseAppData {
+  return { nextIds: data.nextIds, staff: data.staff, jobRoles: data.staff_roles, evaluationItems: data.evaluation_items, ratingCriteria: data.rating_criteria, evaluations: data.evaluations, evaluationScores: data.evaluation_scores, evaluationCycles: data.evaluation_cycles, users: data.users, comments: commentsSnapshot(data) };
+}
+function fromSupabaseAppData(source: SupabaseAppData): AppData {
+  return { ...createEmptyData(), nextIds: source.nextIds as AppData["nextIds"], staff: source.staff as Staff[], staff_roles: source.jobRoles as StaffRole[], evaluation_items: source.evaluationItems as EvaluationItem[], rating_criteria: source.ratingCriteria as RatingCriterion[], evaluations: source.evaluations as Evaluation[], evaluation_scores: source.evaluationScores as JsonEvaluationScore[], evaluation_cycles: source.evaluationCycles as EvaluationCycle[], users: source.users as AppUser[] };
+}
+async function saveData(data: AppData) {
+  if (isSupabaseConfigured()) await saveSupabaseAppData(toSupabaseAppData(data));
+  else {
+    mkdirSync(dataDir, { recursive: true });
+    const tempFile = dataFile + ".tmp";
+    writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8");
+    renameSync(tempFile, dataFile);
+  }
+}
 function monthFromDate(value: string | undefined) { return value && /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : new Date().toISOString().slice(0, 7); }
 function monthEndDate(month: string) { const [year, monthNumber] = month.split("-").map(Number); return new Date(year, monthNumber, 0).toISOString().slice(0, 10); }
 function defaultCycleName(month: string) { const [year, monthNumber] = month.split("-").map(Number); return `${year}年 ${monthNumber <= 6 ? "夏評価" : "冬評価"}`; }
@@ -405,21 +423,29 @@ function seedData(data: AppData) {
   data.evaluation_items.sort((a, b) => a.item_order - b.item_order || a.id - b.id);
   return changed;
 }
-function loadData(): AppData {
-  mkdirSync(dataDir, { recursive: true });
+async function loadData(): Promise<AppData> {
+  if (!isSupabaseConfigured()) mkdirSync(dataDir, { recursive: true });
   let data = createEmptyData();
-  const sourceFile = existsSync(dataFile) ? dataFile : defaultDataFile;
-  if (existsSync(sourceFile)) {
-    try { data = { ...data, ...JSON.parse(readFileSync(sourceFile, "utf8")) } as AppData; } catch { data = createEmptyData(); }
+  let loadedFromSupabase = false;
+  if (isSupabaseConfigured()) {
+    const supabaseData = await loadSupabaseAppData();
+    if (supabaseData) { data = fromSupabaseAppData(supabaseData); loadedFromSupabase = true; }
+  }
+  if (!loadedFromSupabase) {
+    const sourceFile = existsSync(dataFile) ? dataFile : defaultDataFile;
+    if (existsSync(sourceFile)) {
+      try { data = { ...data, ...JSON.parse(readFileSync(sourceFile, "utf8")) } as AppData; } catch { data = createEmptyData(); }
+    }
   }
   const beforeNormalize = JSON.stringify(data);
   normalizeIds(data);
   const normalizedChanged = JSON.stringify(data) !== beforeNormalize;
-  if (seedData(data) || normalizedChanged || !existsSync(dataFile)) saveData(data);
+  const seeded = seedData(data);
+  if (seeded || normalizedChanged || !existsSync(dataFile) || (isSupabaseConfigured() && !loadedFromSupabase)) await saveData(data);
   return data;
 }
-let store = loadData();
-function persist() { normalizeIds(store); saveData(store); }
+let store = await loadData();
+async function persist() { normalizeIds(store); await saveData(store); }
 function withStaffName(evaluation: Evaluation): Evaluation { const staff = store.staff.find((person) => person.id === evaluation.staff_id); const evaluatorStaff = evaluation.evaluator_staff_id ? store.staff.find((person) => person.id === evaluation.evaluator_staff_id) : null; const cycle = evaluation.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === evaluation.evaluation_cycle_id) : null; return { ...evaluation, staff_name: staff?.name ?? "", evaluator_staff_name: evaluatorStaff?.name ?? evaluation.evaluator_name ?? "", evaluation_cycle_name: cycle?.name ?? null }; }
 function staffHasEvaluations(staffId: number) { return store.evaluations.some((evaluation) => evaluation.staff_id === staffId); }
 function syncStaffUser(staff: Staff) {
@@ -492,17 +518,17 @@ function buildStaffCycleHistory(staff: Staff, cycle: EvaluationCycle) {
 export function getEvaluationCycles() { return [...store.evaluation_cycles].sort((a, b) => b.startDate.localeCompare(a.startDate) || b.id - a.id); }
 export function getEvaluationCycle(id: number) { return store.evaluation_cycles.find((cycle) => cycle.id === id) ?? null; }
 export function getActiveEvaluationCycle() { return getActiveCycleInternal(); }
-export function createEvaluationCycle(input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
+export async function createEvaluationCycle(input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
   const timestamp = now();
   const status = normalizeCycleStatus(input.status);
   if (status === "active") store.evaluation_cycles = store.evaluation_cycles.map((cycle) => ({ ...cycle, status: cycle.status === "active" ? "closed" : cycle.status }));
   const cycle: EvaluationCycle = { id: store.nextIds.evaluation_cycle ?? 1, name: input.name.trim() || defaultCycleName(monthFromDate(input.startDate)), startDate: input.startDate, endDate: input.endDate, status, created_at: timestamp, updated_at: timestamp, item_snapshot: getAllEvaluationItems(), rating_criteria_snapshot: getRatingCriteria() };
   store.nextIds.evaluation_cycle = (store.nextIds.evaluation_cycle ?? 1) + 1;
   store.evaluation_cycles.push(cycle);
-  persist();
+  await persist();
   return cycle;
 }
-export function updateEvaluationCycle(id: number, input: Partial<{ name: string; startDate: string; endDate: string; status: EvaluationCycleStatus }>) {
+export async function updateEvaluationCycle(id: number, input: Partial<{ name: string; startDate: string; endDate: string; status: EvaluationCycleStatus }>) {
   const cycle = store.evaluation_cycles.find((item) => item.id === id);
   if (!cycle) throw new Error("Evaluation cycle not found");
   if (input.status === "active") store.evaluation_cycles = store.evaluation_cycles.map((item) => ({ ...item, status: item.id !== id && item.status === "active" ? "closed" : item.status }));
@@ -511,17 +537,17 @@ export function updateEvaluationCycle(id: number, input: Partial<{ name: string;
   if (input.endDate !== undefined) cycle.endDate = input.endDate;
   if (input.status !== undefined) cycle.status = normalizeCycleStatus(input.status);
   cycle.updated_at = now();
-  persist();
+  await persist();
   return cycle;
 }
-export function copyEvaluationCycle(id: number, input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
+export async function copyEvaluationCycle(id: number, input: { name: string; startDate: string; endDate: string; status?: EvaluationCycleStatus }) {
   const source = store.evaluation_cycles.find((cycle) => cycle.id === id);
   if (!source) throw new Error("Evaluation cycle not found");
-  const cycle = createEvaluationCycle({ ...input, status: input.status ?? "draft" });
+  const cycle = await createEvaluationCycle({ ...input, status: input.status ?? "draft" });
   cycle.item_snapshot = source.item_snapshot?.length ? source.item_snapshot : getAllEvaluationItems();
   cycle.rating_criteria_snapshot = source.rating_criteria_snapshot?.length ? source.rating_criteria_snapshot : getRatingCriteria();
   cycle.updated_at = now();
-  persist();
+  await persist();
   return cycle;
 }
 export function getStaffEvaluationHistory(staffId: number) {
@@ -537,14 +563,14 @@ export function getStaffEvaluationHistoryDetail(staffId: number, cycleId: number
 }
 export function getRatingCriteria(): RatingCriterion[] { return normalizeRatingCriteria(store.rating_criteria).map((criterion) => ({ ...criterion })); }
 export function getRatingCriteriaText() { return formatRatingCriteria(getRatingCriteria()); }
-export function saveRatingCriteria(criteria: RatingCriterion[]) { store.rating_criteria = normalizeRatingCriteria(criteria); persist(); return getRatingCriteria(); }
+export async function saveRatingCriteria(criteria: RatingCriterion[]) { store.rating_criteria = normalizeRatingCriteria(criteria); await persist(); return getRatingCriteria(); }
 export function getLoginUsers() { return store.users.filter((user) => user.active === 1).map(safeUser); }
 export function validateLogin(loginId: string, password: string) { const user = store.users.find((item) => item.login_id === loginId && item.active === 1); if (!user || !verifyPassword(password, user.password_hash)) return null; return safeUser(user); }
 export function assertValidNewPassword(password: string, confirmation?: string) { const value = String(password ?? ""); if (value.length < 6) throw new Error("password_too_short"); if (confirmation !== undefined && value !== confirmation) throw new Error("password_mismatch"); return value; }
-export function changeUserPassword(userId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.id === userId && item.active === 1); if (!user) throw new Error("user_not_found"); const nextPassword = assertValidNewPassword(password, confirmation); user.password_hash = hashPassword(nextPassword); user.pin = undefined; persist(); return { ok: true }; }
-export function changeStaffPassword(staffId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff" && item.active === 1); if (!user) throw new Error("user_not_found"); return changeUserPassword(user.id, password, confirmation); }
-export function changeDirectorPassword(password: string, confirmation?: string) { const user = store.users.find((item) => isDirectorRole(item.role) && item.active === 1); if (!user) throw new Error("user_not_found"); return changeUserPassword(user.id, password, confirmation); }
-export function resetStaffPassword(staffId: number) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff"); if (!user) throw new Error("User not found"); user.password_hash = hashPassword(defaultStaffPassword); user.pin = undefined; persist(); return { ok: true }; }
+export async function changeUserPassword(userId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.id === userId && item.active === 1); if (!user) throw new Error("user_not_found"); const nextPassword = assertValidNewPassword(password, confirmation); user.password_hash = hashPassword(nextPassword); user.pin = undefined; await persist(); return { ok: true }; }
+export async function changeStaffPassword(staffId: number, password: string, confirmation?: string) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff" && item.active === 1); if (!user) throw new Error("user_not_found"); return await changeUserPassword(user.id, password, confirmation); }
+export async function changeDirectorPassword(password: string, confirmation?: string) { const user = store.users.find((item) => isDirectorRole(item.role) && item.active === 1); if (!user) throw new Error("user_not_found"); return await changeUserPassword(user.id, password, confirmation); }
+export async function resetStaffPassword(staffId: number) { const user = store.users.find((item) => item.staff_id === staffId && item.role === "staff"); if (!user) throw new Error("User not found"); user.password_hash = hashPassword(defaultStaffPassword); user.pin = undefined; await persist(); return { ok: true }; }
 export function getStaffById(id: number) { return store.staff.find((staff) => staff.id === id && staff.active === 1); }
 function enrichStaff(staff: Staff): Staff {
   const latest = store.evaluations.filter((evaluation) => evaluation.staff_id === staff.id).sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)[0];
@@ -555,25 +581,25 @@ export function getAllStaffList(): Staff[] { return store.staff.map(enrichStaff)
 export function getStaffRoles(): string[] { return getStaffRoleOptions(); }
 export function getStaffRoleOptions(): string[] { return store.staff_roles.filter((role) => role.active === 1).sort((a, b) => a.role_order - b.role_order || a.id - b.id).map((role) => role.name); }
 export function getAllStaffRoles(): StaffRole[] { return store.staff_roles.sort((a, b) => a.role_order - b.role_order || a.id - b.id).map(enrichStaffRole); }
-export function createStaffRole(input: { name: string }) { const name = normalizeStaffRole(input.name); if (!name) throw new Error("Role name is required"); if (store.staff_roles.some((role) => normalizeStaffRole(role.name) === name)) throw new Error("Role already exists"); const role: StaffRole = { id: store.nextIds.staff_role ?? 1, name, active: 1, role_order: store.staff_roles.length + 1, created_at: now() }; store.nextIds.staff_role = role.id + 1; store.staff_roles.push(role); persist(); return enrichStaffRole(role); }
-export function updateStaffRole(id: number, input: { name?: string; active?: number }) { const role = store.staff_roles.find((item) => item.id === id); if (!role) throw new Error("Role not found"); const oldName = role.name; if (input.name !== undefined) { const nextName = normalizeStaffRole(input.name); if (!nextName) throw new Error("Role name is required"); role.name = nextName; if (oldName !== nextName) { store.staff = store.staff.map((staff) => normalizeStaffRole(staff.role) === normalizeStaffRole(oldName) ? { ...staff, role: nextName } : staff); store.evaluation_items = store.evaluation_items.map((item) => ({ ...item, target_roles: normalizeTargetRoles(item.target_roles).map((target) => target === normalizeStaffRole(oldName) ? nextName : target) })); } } if (input.active !== undefined) role.active = input.active ? 1 : 0; persist(); return enrichStaffRole(role); }
-export function deleteStaffRole(id: number) { const role = store.staff_roles.find((item) => item.id === id); if (!role) return { deleted: false, reason: "not_found" as const }; if (staffRoleInUse(role.name)) return { deleted: false, reason: "in_use" as const }; store.staff_roles = store.staff_roles.filter((item) => item.id !== id).map((item, index) => ({ ...item, role_order: index + 1 })); persist(); return { deleted: true, reason: null }; }
-export function createStaff(input: { name: string; role: string }) {
+export async function createStaffRole(input: { name: string }) { const name = normalizeStaffRole(input.name); if (!name) throw new Error("Role name is required"); if (store.staff_roles.some((role) => normalizeStaffRole(role.name) === name)) throw new Error("Role already exists"); const role: StaffRole = { id: store.nextIds.staff_role ?? 1, name, active: 1, role_order: store.staff_roles.length + 1, created_at: now() }; store.nextIds.staff_role = role.id + 1; store.staff_roles.push(role); await persist(); return enrichStaffRole(role); }
+export async function updateStaffRole(id: number, input: { name?: string; active?: number }) { const role = store.staff_roles.find((item) => item.id === id); if (!role) throw new Error("Role not found"); const oldName = role.name; if (input.name !== undefined) { const nextName = normalizeStaffRole(input.name); if (!nextName) throw new Error("Role name is required"); role.name = nextName; if (oldName !== nextName) { store.staff = store.staff.map((staff) => normalizeStaffRole(staff.role) === normalizeStaffRole(oldName) ? { ...staff, role: nextName } : staff); store.evaluation_items = store.evaluation_items.map((item) => ({ ...item, target_roles: normalizeTargetRoles(item.target_roles).map((target) => target === normalizeStaffRole(oldName) ? nextName : target) })); } } if (input.active !== undefined) role.active = input.active ? 1 : 0; await persist(); return enrichStaffRole(role); }
+export async function deleteStaffRole(id: number) { const role = store.staff_roles.find((item) => item.id === id); if (!role) return { deleted: false, reason: "not_found" as const }; if (staffRoleInUse(role.name)) return { deleted: false, reason: "in_use" as const }; store.staff_roles = store.staff_roles.filter((item) => item.id !== id).map((item, index) => ({ ...item, role_order: index + 1 })); await persist(); return { deleted: true, reason: null }; }
+export async function createStaff(input: { name: string; role: string }) {
   const staff: Staff = { id: store.nextIds.staff++, name: input.name.trim(), role: normalizeStaffRole(input.role), active: 1, created_at: now() };
   if (!staff.name) throw new Error("Staff name is required");
-  store.staff.push(staff); syncStaffUser(staff); persist(); return enrichStaff(staff);
+  store.staff.push(staff); syncStaffUser(staff); await persist(); return enrichStaff(staff);
 }
-export function updateStaff(id: number, input: { name?: string; role?: string; active?: number }) {
+export async function updateStaff(id: number, input: { name?: string; role?: string; active?: number }) {
   const staff = store.staff.find((person) => person.id === id); if (!staff) throw new Error("Staff not found");
   if (input.name !== undefined) staff.name = input.name.trim() || staff.name;
   if (input.role !== undefined) staff.role = normalizeStaffRole(input.role);
   if (input.active !== undefined) staff.active = input.active ? 1 : 0;
-  syncStaffUser(staff); persist(); return enrichStaff(staff);
+  syncStaffUser(staff); await persist(); return enrichStaff(staff);
 }
-export function deleteStaff(id: number) {
+export async function deleteStaff(id: number) {
   const staff = store.staff.find((person) => person.id === id); if (!staff) return { deleted: false, reason: "not_found" as const };
   if (staffHasEvaluations(id)) return { deleted: false, reason: "has_evaluations" as const };
-  store.staff = store.staff.filter((person) => person.id !== id); store.users = store.users.filter((user) => user.staff_id !== id); persist(); return { deleted: true, reason: null };
+  store.staff = store.staff.filter((person) => person.id !== id); store.users = store.users.filter((user) => user.staff_id !== id); await persist(); return { deleted: true, reason: null };
 }
 export function getEvaluationItems(): EvaluationItem[] { return [...store.evaluation_items].filter((item) => item.active === 1).sort((a, b) => a.item_order - b.item_order || a.id - b.id); }
 export function getEvaluationItemsForStaff(staffId: number): EvaluationItem[] {
@@ -590,7 +616,7 @@ export function getEvaluationItemsForEvaluation(evaluationId: number): Evaluatio
 }
 export function getAllEvaluationItems(): EvaluationItem[] { return [...store.evaluation_items].sort((a, b) => a.item_order - b.item_order || a.id - b.id); }
 export function getSectionNames(): string[] { return Array.from(new Set([...officialSectionNames, ...store.evaluation_items.map((item) => item.section_name).filter(Boolean)])); }
-export function saveEvaluationItems(items: Array<Partial<EvaluationItem> & { item_name: string; section_name: string; criteria: string; active: number; target_roles?: string[] }>) {
+export async function saveEvaluationItems(items: Array<Partial<EvaluationItem> & { item_name: string; section_name: string; criteria: string; active: number; target_roles?: string[] }>) {
   const existingIds = new Set(store.evaluation_items.map((item) => item.id));
   const nextIds = new Set<number>();
   const normalized = items.map((item, index) => {
@@ -604,22 +630,22 @@ export function saveEvaluationItems(items: Array<Partial<EvaluationItem> & { ite
     const deleted = new Set(deletedIds);
     store.evaluation_scores = store.evaluation_scores.filter((score) => !deleted.has(score.item_id));
   }
-  persist(); return getAllEvaluationItems();
+  await persist(); return getAllEvaluationItems();
 }
 export function getEvaluations(): Evaluation[] { return store.evaluations.map(withStaffName).sort((a, b) => b.entry_date.localeCompare(a.entry_date) || b.id - a.id); }
 export function getEvaluationsForStaffSelf(staffId: number): Evaluation[] { return getEvaluations().filter((evaluation) => evaluation.staff_id === staffId && evaluation.evaluation_type === "self"); }
 export function getEvaluation(id: number): Evaluation | undefined { const evaluation = store.evaluations.find((item) => item.id === id); return evaluation ? withStaffName(evaluation) : undefined; }
 export function getEvaluationScores(evaluationId: number): EvaluationScore[] { return store.evaluation_scores.filter((score) => score.evaluation_id === evaluationId).map(({ evaluation_id, item_id, score, comment, not_applicable, section_name, item_name, criteria, item_order }) => ({ evaluation_id, item_id, score, comment, not_applicable: not_applicable ? 1 : 0, section_name, item_name, criteria, item_order })); }
-export function deleteEvaluation(id: number) { const exists = store.evaluations.some((evaluation) => evaluation.id === id); if (!exists) return false; store.evaluations = store.evaluations.filter((evaluation) => evaluation.id !== id); store.evaluation_scores = store.evaluation_scores.filter((score) => score.evaluation_id !== id); persist(); return true; }
-export function createEvaluation(input: { staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month?: string; entry_date: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; is_360?: number; evaluation_cycle_id?: number | null }) {
+export async function deleteEvaluation(id: number) { const exists = store.evaluations.some((evaluation) => evaluation.id === id); if (!exists) return false; store.evaluations = store.evaluations.filter((evaluation) => evaluation.id !== id); store.evaluation_scores = store.evaluation_scores.filter((score) => score.evaluation_id !== id); await persist(); return true; }
+export async function createEvaluation(input: { staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month?: string; entry_date: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; is_360?: number; evaluation_cycle_id?: number | null }) {
   const cycle = input.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === input.evaluation_cycle_id) : getActiveCycleInternal();
   const evaluationMonth = input.evaluation_month || cycleMonth(cycle);
   const items = getEvaluationItemsForStaff(input.staff_id); const summary = calculateSummary(items, []); const timestamp = now(); const evaluationId = store.nextIds.evaluation++;
   store.evaluations.push({ id: evaluationId, staff_id: input.staff_id, evaluator_name: input.evaluator_name, evaluation_type: input.evaluation_type, evaluation_month: evaluationMonth, entry_date: input.entry_date, total_score: summary.totalScore, max_score: summary.maxScore, average_score: summary.averageScore, rank: summary.rank, comments: "{}", created_at: timestamp, updated_at: timestamp, evaluator_user_id: input.evaluator_user_id ?? null, evaluator_staff_id: input.evaluator_staff_id ?? null, is_360: input.is_360 ? 1 : 0, evaluation_cycle_id: cycle?.id ?? null });
   for (const item of items) store.evaluation_scores.push({ id: store.nextIds.score++, evaluation_id: evaluationId, item_id: item.id, score: null, comment: "", not_applicable: 0, ...snapshotItem(item) });
-  persist(); return evaluationId;
+  await persist(); return evaluationId;
 }
-export function updateEvaluation(id: number, payload: { scores: Array<{ item_id: number; score: number | null; comment?: string; not_applicable?: number | boolean }>; comments?: CommentValues }) {
+export async function updateEvaluation(id: number, payload: { scores: Array<{ item_id: number; score: number | null; comment?: string; not_applicable?: number | boolean }>; comments?: CommentValues }) {
   const evaluation = store.evaluations.find((item) => item.id === id); if (!evaluation) throw new Error("Evaluation not found");
   for (const incoming of payload.scores) {
     const notApplicable = incoming.not_applicable ? 1 : 0;
@@ -629,19 +655,19 @@ export function updateEvaluation(id: number, payload: { scores: Array<{ item_id:
     else { const item = store.evaluation_items.find((entry) => entry.id === incoming.item_id) ?? getEvaluationItemsForEvaluation(id).find((entry) => entry.id === incoming.item_id); store.evaluation_scores.push({ id: store.nextIds.score++, evaluation_id: id, item_id: incoming.item_id, score: nextScore, comment: incoming.comment ?? "", not_applicable: notApplicable, ...(item ? snapshotItem(item) : {}) }); }
   }
   const items = getEvaluationItemsForEvaluation(id); const savedScores = getEvaluationScores(id); const summary = calculateSummary(items, savedScores);
-  evaluation.total_score = summary.totalScore; evaluation.max_score = summary.maxScore; evaluation.average_score = summary.averageScore; evaluation.rank = summary.rank; if (payload.comments) evaluation.comments = JSON.stringify(payload.comments); evaluation.updated_at = now(); persist(); return summary;
+  evaluation.total_score = summary.totalScore; evaluation.max_score = summary.maxScore; evaluation.average_score = summary.averageScore; evaluation.rank = summary.rank; if (payload.comments) evaluation.comments = JSON.stringify(payload.comments); evaluation.updated_at = now(); await persist(); return summary;
 }
 
 function currentEvaluationMonth() { return new Date().toISOString().slice(0, 7); }
 function currentEntryDate() { return new Date().toISOString().slice(0, 10); }
 function get360EvaluationType(user: CurrentUser, staffId: number): EvaluationType { if (isDirectorRole(user.role)) return "director"; return user.staff_id === staffId ? "self" : "peer"; }
 function find360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), cycleId: number | null = getActiveCycleInternal()?.id ?? null) { return store.evaluations.find((evaluation) => evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id && evaluation.staff_id === staffId && ((cycleId && evaluation.evaluation_cycle_id === cycleId) || (!evaluation.evaluation_cycle_id && evaluation.evaluation_month === month))); }
-export function getOrCreate360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), entryDate = currentEntryDate(), cycleId = getActiveCycleInternal()?.id ?? null) {
+export async function getOrCreate360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), entryDate = currentEntryDate(), cycleId = getActiveCycleInternal()?.id ?? null) {
   const cycle = cycleId ? store.evaluation_cycles.find((item) => item.id === cycleId) : getActiveCycleInternal();
   const evaluationMonth = cycle ? cycleMonth(cycle) : month;
   const existing = find360Evaluation(user, staffId, evaluationMonth, cycle?.id ?? null);
   if (existing) return existing.id;
-  return createEvaluation({ staff_id: staffId, evaluator_name: user.name, evaluation_type: get360EvaluationType(user, staffId), evaluation_month: evaluationMonth, entry_date: entryDate, evaluator_user_id: user.id, evaluator_staff_id: user.staff_id, is_360: 1, evaluation_cycle_id: cycle?.id ?? null });
+  return await createEvaluation({ staff_id: staffId, evaluator_name: user.name, evaluation_type: get360EvaluationType(user, staffId), evaluation_month: evaluationMonth, entry_date: entryDate, evaluator_user_id: user.id, evaluator_staff_id: user.staff_id, is_360: 1, evaluation_cycle_id: cycle?.id ?? null });
 }
 function is360EvaluationComplete(evaluation: Evaluation) {
   const scores = store.evaluation_scores.filter((score) => score.evaluation_id === evaluation.id);

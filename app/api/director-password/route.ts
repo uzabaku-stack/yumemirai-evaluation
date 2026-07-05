@@ -9,7 +9,7 @@ export async function PATCH(request: Request) {
   if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   const body = await request.json();
   try {
-    changeUserPassword(user.id, String(body.password ?? ""), String(body.password_confirmation ?? ""));
+    await changeUserPassword(user.id, String(body.password ?? ""), String(body.password_confirmation ?? ""));
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "password_error";
