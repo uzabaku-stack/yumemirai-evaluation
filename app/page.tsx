@@ -2,7 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BarChart3, CalendarCheck, ChevronRight, CircleDollarSign, ClipboardList, Settings, Sparkles, UserCheck, Users } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
+import { getActiveEvaluationCycle, getEvaluationCycles, getEvaluations, getStaffList } from "@/lib/db";
 import { isDirectorRole } from "@/lib/permissions";
+import type { Evaluation, EvaluationCycle } from "@/lib/types";
 
 type DirectorCard = {
   title: string;
@@ -68,7 +70,95 @@ const staffCards = [
   },
 ];
 
+type BonusCalculationStatus = "未実施" | "計算中" | "確定済み";
+
+type EvaluationDashboardStats = {
+  cycleName: string;
+  missingCount: number;
+  completedCount: number;
+  targetStaffCount: number;
+  averageScore: number | null;
+  bonusStatus: BonusCalculationStatus;
+};
+
+function isEvaluationInCycle(evaluation: Evaluation, cycle: EvaluationCycle | null) {
+  if (!cycle) return true;
+  if (evaluation.evaluation_cycle_id) return evaluation.evaluation_cycle_id === cycle.id;
+  const cycleMonth = cycle.startDate.slice(0, 7);
+  return evaluation.evaluation_month === cycleMonth;
+}
+
+function getAverageScore(evaluations: Evaluation[]) {
+  const values = evaluations
+    .map((evaluation) => Number(evaluation.average_score))
+    .filter((score) => Number.isFinite(score) && score > 0);
+
+  if (values.length === 0) return null;
+  return values.reduce((sum, score) => sum + score, 0) / values.length;
+}
+
+function getBonusCalculationStatus(completedCount: number, targetStaffCount: number): BonusCalculationStatus {
+  if (targetStaffCount > 0 && completedCount >= targetStaffCount) return "計算中";
+  return "未実施";
+}
+
+function getEvaluationDashboardStats(): EvaluationDashboardStats {
+  const staff = getStaffList();
+  const cycles = getEvaluationCycles();
+  const selectedCycle = getActiveEvaluationCycle() ?? cycles[0] ?? null;
+  const cycleEvaluations = getEvaluations().filter((evaluation) => isEvaluationInCycle(evaluation, selectedCycle));
+  const completedStaffIds = new Set(
+    cycleEvaluations
+      .filter((evaluation) => Number.isFinite(Number(evaluation.average_score)) && Number(evaluation.average_score) > 0)
+      .map((evaluation) => evaluation.staff_id),
+  );
+  const targetStaffCount = staff.length;
+  const completedCount = staff.filter((member) => completedStaffIds.has(member.id)).length;
+
+  return {
+    cycleName: selectedCycle?.name ?? "評価期間未設定",
+    missingCount: Math.max(targetStaffCount - completedCount, 0),
+    completedCount,
+    targetStaffCount,
+    averageScore: getAverageScore(cycleEvaluations),
+    bonusStatus: getBonusCalculationStatus(completedCount, targetStaffCount),
+  };
+}
+
+function EvaluationStatusDashboard({ stats }: { stats: EvaluationDashboardStats }) {
+  const statItems = [
+    { label: "評価期間", value: stats.cycleName },
+    { label: "未回答", value: `${stats.missingCount}名` },
+    { label: "評価完了", value: `${stats.completedCount} / ${stats.targetStaffCount}名` },
+    { label: "平均評価", value: stats.averageScore === null ? "-" : stats.averageScore.toFixed(2) },
+    { label: "賞与計算", value: stats.bonusStatus },
+  ];
+
+  return (
+    <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft sm:p-6">
+      <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-bold text-clinic">評価状況ダッシュボード</p>
+          <h2 className="mt-1 text-2xl font-bold text-ink">現在の評価状況</h2>
+        </div>
+        <span className="w-fit rounded-full bg-mint px-4 py-2 text-sm font-bold text-clinic">
+          {stats.bonusStatus}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {statItems.map((item) => (
+          <div key={item.label} className="rounded border border-slate-100 bg-slate-50 p-4">
+            <p className="text-sm font-bold text-slate-500">{item.label}</p>
+            <p className="mt-2 text-2xl font-bold text-ink">{item.value}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 function DirectorHome() {
+  const dashboardStats = getEvaluationDashboardStats();
+
   return (
     <div className="space-y-6">
       <section className="rounded border border-teal-900/10 bg-white p-6 shadow-soft">
@@ -76,6 +166,8 @@ function DirectorHome() {
         <h1 className="mt-2 text-3xl font-bold text-ink">院長ダッシュボード</h1>
         <p className="mt-2 text-slate-600">業務評価・賞与計算・分析をここから管理します。</p>
       </section>
+
+      <EvaluationStatusDashboard stats={dashboardStats} />
 
       <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {directorCards.map((card) => {
