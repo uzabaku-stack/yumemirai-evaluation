@@ -1,0 +1,96 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { ArrowDownAZ, ArrowUpAZ } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth";
+import { get360SummaryForCycle, getEvaluationCycles, getEvaluations } from "@/lib/db";
+import { isDirectorRole } from "@/lib/permissions";
+import { ThemeRadarChart } from "@/components/ThemeRadarChart";
+import { calculateEvaluationStandardization } from "@/lib/evaluationStandardization";
+
+type SortMode = "low" | "high";
+type TypeFilter = "all" | "self" | "peer" | "director";
+type Search = { sort?: SortMode; cycleId?: string; type?: TypeFilter };
+
+type Summary = ReturnType<typeof get360SummaryForCycle>;
+type StaffSummary = Summary["staff_summaries"][number];
+type ThemeRow = StaffSummary["theme_breakdown"][number];
+type RankingRow = Summary["item_rankings"][number];
+
+function fmt(value: number | null | undefined) { return value === null || value === undefined || !Number.isFinite(value) ? "-" : value.toFixed(2); }
+function signed(value: number | null | undefined) { return value === null || value === undefined || !Number.isFinite(value) ? "-" : (value > 0 ? "+" : "") + value.toFixed(2); }
+function average(values: Array<number | null | undefined>) { const usable = values.filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value)); return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null; }
+function barWidth(value: number | null | undefined) { return String(Math.max(0, Math.min(100, ((value ?? 0) / 5) * 100))) + "%"; }
+function scoreTone(value: number | null | undefined) { if (value === null || value === undefined) return "text-slate-400"; if (value < 3) return "text-red-600"; if (value >= 4) return "text-clinic"; return "text-ink"; }
+function typeLabel(type: TypeFilter) { if (type === "self") return "自己評価"; if (type === "peer") return "360評価"; if (type === "director") return "院長評価"; return "全評価"; }
+function staffAverage(row: StaffSummary, type: TypeFilter) { if (type === "self") return row.self_average; if (type === "peer") return row.peer_average; if (type === "director") return row.director_average; return average([row.self_average, row.peer_average, row.director_average]); }
+function themeAverage(row: ThemeRow, type: TypeFilter) { if (type === "self") return row.self_average; if (type === "peer") return row.peer_average; if (type === "director") return row.director_average; return row.overall_average; }
+function sortByMode<T>(rows: T[], getter: (row: T) => number | null | undefined, sortMode: SortMode) { return [...rows].sort((a, b) => sortMode === "high" ? (getter(b) ?? -1) - (getter(a) ?? -1) : (getter(a) ?? 99) - (getter(b) ?? 99)); }
+
+function hrefFor(params: Search, patch: Partial<Search>) {
+  const next = new URLSearchParams();
+  const merged: Search = { ...params, ...patch };
+  for (const [key, value] of Object.entries(merged)) if (value !== undefined && value !== "" && value !== "all") next.set(key, String(value));
+  const query = next.toString();
+  return "/analytics" + (query ? "?" + query : "");
+}
+
+function SimpleBarChart({ rows }: { rows: Array<{ label: string; value: number | null; note?: string }> }) {
+  return <div className="space-y-3">{rows.length ? rows.map((row) => <div key={row.label} className="grid gap-2 md:grid-cols-[180px_1fr_70px]"><div className="font-bold text-ink">{row.label}{row.note ? <span className="ml-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">{row.note}</span> : null}</div><div className="h-9 overflow-hidden rounded bg-slate-100"><div className="flex h-full items-center justify-end rounded bg-clinic px-2 text-sm font-bold text-white" style={{ width: barWidth(row.value) }}>{fmt(row.value)}</div></div><div className="text-right text-lg font-bold text-clinic">{fmt(row.value)}</div></div>) : <p className="text-slate-500">表示できるデータがありません。</p>}</div>;
+}
+
+function LineTrendChart({ rows }: { rows: Array<{ label: string; value: number | null }> }) {
+  const width = 720;
+  const points = rows.map((row, index) => {
+    const x = rows.length <= 1 ? width / 2 : 40 + (index * (width - 80)) / (rows.length - 1);
+    const y = row.value === null ? null : 180 - (Math.max(0, Math.min(5, row.value)) / 5) * 140;
+    return { ...row, x, y };
+  });
+  const line = points.filter((point): point is typeof point & { y: number } => point.y !== null).map((point) => point.x.toFixed(1) + "," + point.y.toFixed(1)).join(" ");
+  return <div className="overflow-x-auto"><svg viewBox="0 0 720 240" className="min-w-[620px] rounded border border-slate-200 bg-white" role="img" aria-label="時系列推移グラフ"><g>{[1, 2, 3, 4, 5].map((score) => { const y = 180 - (score / 5) * 140; return <g key={score}><line x1="40" x2="680" y1={y} y2={y} stroke="#e2e8f0" /><text x="16" y={y + 4} className="fill-slate-500 text-[11px]">{score}</text></g>; })}</g>{line ? <polyline points={line} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /> : null}{points.map((point) => <g key={point.label}><text x={point.x} y="218" textAnchor="middle" className="fill-slate-600 text-[11px] font-bold">{point.label}</text>{point.y !== null ? <><circle cx={point.x} cy={point.y} r="6" fill="#0f766e" /><text x={point.x} y={point.y - 12} textAnchor="middle" className="fill-slate-700 text-[12px] font-bold">{fmt(point.value)}</text></> : null}</g>)}</svg></div>;
+}
+
+export default async function AnalyticsPage({ searchParams }: { searchParams?: Promise<Search> }) {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!isDirectorRole(user.role)) redirect("/");
+
+  const query = searchParams ? await searchParams : {};
+  const sortMode: SortMode = query.sort === "high" ? "high" : "low";
+  const typeFilter: TypeFilter = query.type === "self" || query.type === "peer" || query.type === "director" ? query.type : "all";
+  const cycles = getEvaluationCycles();
+  const selectedCycle = cycles.find((cycle) => cycle.id === Number(query.cycleId)) ?? cycles.find((cycle) => cycle.status === "active") ?? cycles[0];
+  const summary = selectedCycle ? get360SummaryForCycle(selectedCycle.id) : get360SummaryForCycle(cycles[0]?.id ?? 0);
+  const allEvaluations = getEvaluations();
+  const listedEvaluations = allEvaluations.filter((evaluation) => selectedCycle ? evaluation.evaluation_cycle_id === selectedCycle.id || (!evaluation.evaluation_cycle_id && evaluation.evaluation_month === selectedCycle.startDate.slice(0, 7)) : true);
+  const standardization = calculateEvaluationStandardization(listedEvaluations);
+  const standardizedByStaff = new Map(standardization.staffScores.map((score) => [score.staffId, score]));
+  const clinicOverall = average(summary.staff_summaries.map((row) => staffAverage(row, typeFilter)));
+  const sortedStaff = sortByMode(summary.staff_summaries, (row) => staffAverage(row, typeFilter), sortMode);
+  const itemRankings = sortByMode(summary.item_rankings, (row) => row.average, sortMode).slice(0, 20);
+  const highItems = sortByMode(summary.item_rankings, (row) => row.average, "high").slice(0, 5);
+  const lowItems = sortByMode(summary.item_rankings, (row) => row.average, "low").slice(0, 5);
+  const themes = summary.theme_rankings.map((item) => item.theme);
+  const radarValues = summary.theme_rankings.map((item) => ({ theme: item.theme, average: item.average }));
+  const trendRows = [...cycles].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((cycle) => {
+    const cycleSummary = get360SummaryForCycle(cycle.id);
+    return { label: cycle.name, value: average(cycleSummary.staff_summaries.map((row) => staffAverage(row, typeFilter))) };
+  });
+  const params: Search = { cycleId: selectedCycle ? String(selectedCycle.id) : undefined, sort: sortMode, type: typeFilter };
+
+  return <div className="space-y-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-3xl font-bold">集計分析</h1><p className="mt-1 text-slate-600">全体傾向・項目別分析・ランキングを確認します。</p></div><Link href="/" className="rounded border border-clinic px-5 py-4 font-bold text-clinic">トップへ戻る</Link></div>
+
+    <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">分析条件</h2><div className="mt-4 grid gap-4 lg:grid-cols-3"><div><div className="mb-2 text-sm font-bold text-slate-600">評価期間</div><div className="flex flex-wrap gap-2">{cycles.map((cycle) => <Link key={cycle.id} href={hrefFor(params, { cycleId: String(cycle.id) })} className={(selectedCycle?.id === cycle.id ? "bg-clinic text-white" : "border border-clinic text-clinic") + " rounded px-4 py-3 font-bold"}>{cycle.name}</Link>)}</div></div><div><div className="mb-2 text-sm font-bold text-slate-600">評価種別</div><div className="flex flex-wrap gap-2">{(["all", "self", "peer", "director"] as TypeFilter[]).map((type) => <Link key={type} href={hrefFor(params, { type })} className={(typeFilter === type ? "bg-clinic text-white" : "border border-clinic text-clinic") + " rounded px-4 py-3 font-bold"}>{typeLabel(type)}</Link>)}</div></div><div><div className="mb-2 text-sm font-bold text-slate-600">並び順</div><div className="flex flex-wrap gap-2"><Link href={hrefFor(params, { sort: "low" })} className={(sortMode === "low" ? "bg-clinic text-white" : "border border-clinic text-clinic") + " inline-flex min-h-11 items-center gap-2 rounded px-4 py-2 font-bold"}><ArrowDownAZ size={18} />低い順</Link><Link href={hrefFor(params, { sort: "high" })} className={(sortMode === "high" ? "bg-clinic text-white" : "border border-clinic text-clinic") + " inline-flex min-h-11 items-center gap-2 rounded px-4 py-2 font-bold"}><ArrowUpAZ size={18} />高い順</Link></div></div></div></section>
+
+    <section className="grid gap-4 md:grid-cols-4"><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="text-sm font-bold text-slate-500">全体平均</div><div className="mt-2 text-3xl font-bold text-clinic">{fmt(clinicOverall)}</div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="text-sm font-bold text-slate-500">評価件数</div><div className="mt-2 text-3xl font-bold text-clinic">{listedEvaluations.length}</div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="text-sm font-bold text-slate-500">評価者数</div><div className="mt-2 text-3xl font-bold text-clinic">{standardization.evaluatorAverages.length}</div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="text-sm font-bold text-slate-500">評価期間</div><div className="mt-2 text-xl font-bold text-ink">{selectedCycle?.name ?? "-"}</div></div></section>
+
+    <section className="grid gap-5 xl:grid-cols-2"><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">スタッフランキング</h2><p className="mt-1 text-sm text-slate-600">評価種別に応じたスタッフ別平均です。</p><div className="mt-4"><SimpleBarChart rows={sortedStaff.map((row) => ({ label: row.staff.name, value: staffAverage(row, typeFilter), note: row.peer_evaluator_count > 0 && row.peer_evaluator_count < 3 ? "参考値" : undefined }))} /></div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">カテゴリ別レーダーチャート</h2><p className="mt-1 text-sm text-slate-600">評価シートのセクション別平均を表示します。</p><ThemeRadarChart themes={themes} series={[{ label: typeLabel(typeFilter), color: "#0f766e", values: radarValues }]} /></div></section>
+
+    <section className="grid gap-5 xl:grid-cols-2"><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">項目別平均</h2><p className="mt-1 text-sm text-slate-600">低い順では改善候補、高い順では強みを確認できます。</p><div className="mt-4"><SimpleBarChart rows={itemRankings.map((item: RankingRow) => ({ label: item.item_name, value: item.average, note: item.count > 0 && item.count < 3 ? "参考値" : undefined }))} /></div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">前回比較</h2><p className="mt-1 text-sm text-slate-600">評価回ごとの全体平均推移です。</p><div className="mt-4"><LineTrendChart rows={trendRows} /></div></div></section>
+
+    <section className="grid gap-5 xl:grid-cols-2"><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">評価が高い項目</h2><div className="mt-4 space-y-3">{highItems.map((item) => <div key={item.item_id} className="flex items-center justify-between rounded bg-mint p-4"><span className="font-bold">{item.item_name}</span><span className="text-xl font-bold text-clinic">{fmt(item.average)}</span></div>)}</div></div><div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">評価が低い項目</h2><div className="mt-4 space-y-3">{lowItems.map((item) => <div key={item.item_id} className="flex items-center justify-between rounded border border-slate-200 p-4"><span className="font-bold">{item.item_name}</span><span className="text-xl font-bold text-ink">{fmt(item.average)}</span></div>)}</div></div></section>
+
+    <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">評価者ごとの甘辛傾向</h2><p className="mt-1 text-sm text-slate-600">評価者平均と補正値を確認できます。補正ロジックは評価標準化に使用します。</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="border-b text-sm text-slate-500"><th className="py-3">評価者</th><th>平均</th><th>件数</th><th>補正値</th></tr></thead><tbody>{standardization.evaluatorAverages.length ? standardization.evaluatorAverages.map((row) => <tr key={row.evaluatorKey} className="border-b last:border-0"><td className="py-3 font-bold">{row.evaluatorKey}</td><td className={"font-bold " + scoreTone(row.average)}>{fmt(row.average)}</td><td>{row.count}</td><td>{signed(row.adjustment)}</td></tr>) : <tr><td colSpan={4} className="py-8 text-center text-slate-500">表示できる評価者データはありません。</td></tr>}</tbody></table></div></section>
+
+    <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h2 className="text-xl font-bold">評価標準化</h2><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="border-b text-sm text-slate-500"><th className="py-3">スタッフ</th><th>スタッフ評価平均</th><th>評価標準化</th><th>賞与反映評価</th><th>評価件数</th></tr></thead><tbody>{sortedStaff.map((row) => { const standardized = standardizedByStaff.get(row.staff.id); return <tr key={row.staff.id} className="border-b last:border-0"><td className="py-3 font-bold">{row.staff.name}</td><td>{fmt(standardized?.rawAverage ?? staffAverage(row, typeFilter))}</td><td className="font-bold text-clinic">{fmt(standardized?.standardizedScore)}</td><td className="font-bold text-clinic">{fmt(standardized?.bonusScore)}</td><td>{standardized?.evaluationCount ?? 0}</td></tr>; })}</tbody></table></div></section>
+  </div>;
+}

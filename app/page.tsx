@@ -28,7 +28,7 @@ const directorCards: DirectorCard[] = [
   },
   {
     title: "評価結果",
-    description: "評価結果・評価履歴・評価削除を管理します。",
+    description: "スタッフごとの評価結果・履歴・削除を管理します。",
     href: "/360/results",
     icon: UserCheck,
   },
@@ -40,8 +40,8 @@ const directorCards: DirectorCard[] = [
   },
   {
     title: "集計分析",
-    description: "評価傾向を分析します。",
-    href: "/360/results",
+    description: "全体傾向・項目別分析・ランキングを確認します。",
+    href: "/analytics",
     icon: BarChart3,
   },
   {
