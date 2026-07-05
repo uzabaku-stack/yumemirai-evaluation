@@ -23,7 +23,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       currentUser,
       loginUser,
     });
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
   const user = currentUser;
   const { id } = resolvedParams;
@@ -60,21 +60,27 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       evaluatorStaffIdMatches,
       is360,
     });
-    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   }
   const body = await request.json();
-  const summary = await updateEvaluation(Number(id), { scores: body.scores ?? [], comments: body.comments });
-  return NextResponse.json(summary);
+  try {
+    const summary = await updateEvaluation(Number(id), { scores: body.scores ?? [], comments: body.comments });
+    const updatedEvaluation = getEvaluation(Number(id));
+    return NextResponse.json({ success: true, evaluation: updatedEvaluation, summary });
+  } catch (error) {
+    console.error("evaluations PUT failed", error);
+    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "保存できませんでした" }, { status: 400 });
+  }
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (!isDirectorRole(user.role)) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  if (!isDirectorRole(user.role)) return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   const { id } = await params;
   await refreshStoreFromRemote();
   const evaluation = getEvaluation(Number(id));
-  if (!evaluation) return NextResponse.json({ message: "Not found" }, { status: 404 });
+  if (!evaluation) return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
   await deleteEvaluation(evaluation.id);
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ success: true });
 }

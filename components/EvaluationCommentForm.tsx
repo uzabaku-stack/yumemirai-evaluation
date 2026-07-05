@@ -61,19 +61,30 @@ export function EvaluationCommentForm({ user, targets, fields, title, descriptio
     try {
       for (const target of targets) {
         const response = await fetch("/api/evaluations/" + target.evaluation.id, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scores: [], comments: buildComments(target) }) });
-        if (!response.ok) throw new Error("save failed");
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          const error = data?.error || "保存できませんでした";
+          console.error("save evaluation failed", { status: response.status, ok: response.ok, data, error });
+          throw new Error(error);
+        }
       }
       setSaveMessage("保存しました");
-      router.push(backHref + (backHref.includes("?") ? "&" : "?") + "saved=1");
-      router.refresh();
+      try {
+        router.push(backHref + (backHref.includes("?") ? "&" : "?") + "saved=1");
+        router.refresh();
+      } catch (reloadError) {
+        console.error("reload after save failed", reloadError);
+        setSaveMessage("保存しました。ただし再読み込みに失敗しました");
+      }
     } catch (error) {
-      console.error(error);
-      setSaveMessage("保存できませんでした");
-      alert("保存できませんでした");
+      const message = error instanceof Error ? error.message : "保存できませんでした";
+      console.error("save evaluation failed", { status: null, ok: false, data: null, error: message });
+      setSaveMessage(message);
+      alert(message);
     } finally {
       setSaving(false);
     }
   }
 
-  return <div className="space-y-5"><section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h1 className="text-3xl font-bold">{title}</h1><p className="mt-2 text-slate-600">{description}</p></section><section className="grid gap-4 lg:grid-cols-2">{targets.map((target) => { const current = values[target.evaluation.id] ?? {}; return <div key={target.evaluation.id} className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-bold">{target.staff.name}</h2><span className="rounded bg-mint px-3 py-1 text-sm font-bold text-clinic">{target.evaluation.evaluation_type === "director" ? "院長評価" : "自己評価"}</span></div><div className="space-y-4">{fields.map((field) => <label key={field} className="block"><span className="font-bold">{field}</span><textarea value={current[field] ?? ""} onChange={(event) => setComment(target.evaluation.id, field, event.target.value)} className="mt-2 min-h-28 w-full rounded border border-slate-300 p-3 text-base" /></label>)}</div></div>; })}</section>{saveMessage ? <div className={(saveMessage.includes("できません") ? "border-red-200 bg-red-50 text-red-700" : "border-teal-200 bg-mint text-clinic") + " rounded border px-4 py-3 font-bold"}>{saveMessage}</div> : null}<div className="sticky bottom-0 -mx-5 border-t bg-paper/95 p-4 backdrop-blur"><button onClick={save} disabled={saving} className="flex min-h-16 w-full items-center justify-center gap-2 rounded bg-clinic px-6 py-5 text-xl font-bold text-white disabled:opacity-60"><Save />{saving ? "保存中..." : "コメントを保存"}</button></div></div>;
+  return <div className="space-y-5"><section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><h1 className="text-3xl font-bold">{title}</h1><p className="mt-2 text-slate-600">{description}</p></section><section className="grid gap-4 lg:grid-cols-2">{targets.map((target) => { const current = values[target.evaluation.id] ?? {}; return <div key={target.evaluation.id} className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-bold">{target.staff.name}</h2><span className="rounded bg-mint px-3 py-1 text-sm font-bold text-clinic">{target.evaluation.evaluation_type === "director" ? "院長評価" : "自己評価"}</span></div><div className="space-y-4">{fields.map((field) => <label key={field} className="block"><span className="font-bold">{field}</span><textarea value={current[field] ?? ""} onChange={(event) => setComment(target.evaluation.id, field, event.target.value)} className="mt-2 min-h-28 w-full rounded border border-slate-300 p-3 text-base" /></label>)}</div></div>; })}</section>{saveMessage ? <div className={(saveMessage.includes("できません") || saveMessage.includes("失敗") || saveMessage.includes("できません") || saveMessage.includes("失敗") ? "border-red-200 bg-red-50 text-red-700" : "border-teal-200 bg-mint text-clinic") + " rounded border px-4 py-3 font-bold"}>{saveMessage}</div> : null}<div className="sticky bottom-0 -mx-5 border-t bg-paper/95 p-4 backdrop-blur"><button onClick={save} disabled={saving} className="flex min-h-16 w-full items-center justify-center gap-2 rounded bg-clinic px-6 py-5 text-xl font-bold text-white disabled:opacity-60"><Save />{saving ? "保存中..." : "コメントを保存"}</button></div></div>;
 }
