@@ -1,9 +1,8 @@
 "use client";
-import { isDirectorRole } from "@/lib/permissions";
-
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
+import { isDirectorRole } from "@/lib/permissions";
 import type { CurrentUser, Evaluation, EvaluationItem, EvaluationScore, Staff } from "@/lib/types";
 
 type Target = {
@@ -86,7 +85,7 @@ export function Evaluation360Matrix({ user, items, targets, afterSavePath = "/36
       setBulkMessage("一括設定できる評価項目がありません。");
       return;
     }
-    const modeText = mode === "empty" ? "未入力の項目だけ3点にします。既に1〜5点が入っている項目と「評価しない」は変更しません。" : "既に入力済みの点数もすべて3点に上書きします。";
+    const modeText = mode === "empty" ? "未入力の項目だけ3点にします。すでに1〜5点が入っている項目と「評価しない」は変更しません。" : "入力済みの点数もすべて3点に上書きします。";
     if (!window.confirm(message + "\n\n" + modeText + "対象外の項目には反映しません。")) return;
     let changedCount = 0;
     setValues((current) => {
@@ -176,13 +175,131 @@ export function Evaluation360Matrix({ user, items, targets, afterSavePath = "/36
     }
   }
 
-  function cell(target: Target, item: EvaluationItem) {
-    if (!appliesToStaff(item, target.staff)) return <div className="flex min-h-24 items-center justify-center rounded bg-slate-100 px-3 py-4 text-sm font-bold text-slate-500">対象外</div>;
+  function cell(target: Target, item: EvaluationItem, compact = false) {
+    if (!appliesToStaff(item, target.staff)) return <div className="flex min-h-14 items-center justify-center rounded bg-slate-100 px-3 py-4 text-sm font-bold text-slate-500">対象外</div>;
     const key = cellKey(target.evaluation.id, item.id);
     const value = values[key] ?? { score: null, not_applicable: false };
     const canSkip = target.evaluation.evaluation_type !== "self";
-    return <div className="min-h-24 space-y-2 rounded border border-slate-200 bg-white p-2"><div className="grid grid-cols-5 gap-1">{scoreOptions.map((score) => <button key={score} type="button" onClick={() => setScore(target.evaluation.id, item.id, score)} className={(value.score === score && !value.not_applicable ? "bg-clinic text-white" : "bg-slate-100 text-ink") + " min-h-11 rounded text-base font-bold"}>{score}</button>)}</div>{canSkip ? <button type="button" onClick={() => setNotApplicable(target.evaluation.id, item.id)} className={(value.not_applicable ? "border-coral bg-coral text-white" : "border-slate-300 bg-white text-slate-700") + " min-h-10 w-full rounded border px-2 text-sm font-bold"}>評価しない</button> : <div className="min-h-10 rounded bg-mint px-2 py-2 text-center text-xs font-bold text-clinic">自己評価</div>}</div>;
+    return (
+      <div className={(compact ? "space-y-3" : "min-h-24 space-y-2") + " rounded border border-slate-200 bg-white p-2"}>
+        <div className="grid grid-cols-5 gap-2">
+          {scoreOptions.map((score) => (
+            <button key={score} type="button" onClick={() => setScore(target.evaluation.id, item.id, score)} className={(value.score === score && !value.not_applicable ? "bg-clinic text-white" : "bg-slate-100 text-ink") + " min-h-12 rounded text-base font-bold sm:min-h-11"}>{score}</button>
+          ))}
+        </div>
+        {canSkip ? (
+          <button type="button" onClick={() => setNotApplicable(target.evaluation.id, item.id)} className={(value.not_applicable ? "border-coral bg-coral text-white" : "border-slate-300 bg-white text-slate-700") + " min-h-12 w-full rounded border px-3 text-sm font-bold"}>評価しない</button>
+        ) : (
+          <div className="min-h-12 rounded bg-mint px-3 py-3 text-center text-sm font-bold text-clinic">自己評価</div>
+        )}
+      </div>
+    );
   }
 
-  return <div className="space-y-5"><section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft"><div className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-3xl font-bold">{isDirectorMode ? "院長評価" : "360°評価"}</h1><p className="mt-1 text-slate-600">短時間で全員の点数を入力する画面です。他人評価のコメント欄は表示しません。</p><p className="mt-2 text-sm font-bold text-clinic">一括設定は、入力可能な全スタッフ・全評価項目が対象です。対象外の項目には反映しません。</p></div><div className="flex flex-wrap gap-3"><button type="button" onClick={() => bulkSet(items, 3, "empty", "未入力の評価項目だけ3点にします。よろしいですか？")} className="min-h-14 rounded border border-clinic bg-white px-6 py-4 text-lg font-bold text-clinic shadow-soft">未入力だけ3点</button><button type="button" onClick={() => bulkSet(items, 3, "overwrite", "入力可能な全スタッフ・全評価項目を3点に上書きします。よろしいですか？")} className="min-h-14 rounded bg-clinic px-6 py-4 text-lg font-bold text-white shadow-soft">全項目を3点に上書き</button></div></div><div className="mt-4 rounded border border-teal-100 bg-mint/50 px-4 py-3 text-sm font-bold text-clinic">対象: 入力可能セル {inputtableCellCount} 件。「未入力だけ3点」は入力済みと評価しないを変更しません。「全項目を3点に上書き」は既存点も変更します。</div>{bulkMessage ? <div className="mt-3 rounded border border-teal-200 bg-white px-4 py-3 text-sm font-bold text-clinic">{bulkMessage}</div> : null}</section><div className="space-y-6">{Object.entries(grouped).map(([section, sectionItems]) => <section key={section} className="rounded border border-teal-900/10 bg-white p-4 shadow-soft"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-2xl font-bold">{section}</h2><div className="flex flex-wrap gap-2"><button type="button" onClick={() => bulkSet(sectionItems, 3, "overwrite", "「" + section + "」を全員3点に変更します。よろしいですか？")} className="min-h-12 rounded bg-mint px-4 py-3 font-bold text-clinic">このセクションを3点</button>{scoreOptions.map((score) => <button key={score} type="button" onClick={() => bulkSet(sectionItems, score, "overwrite", "「" + section + "」を全員" + score + "点に変更します。よろしいですか？")} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">{score}点</button>)}</div></div><div className="max-h-[72vh] overflow-auto rounded border border-slate-200"><table className="border-separate border-spacing-0 text-left"><thead><tr><th className="sticky left-0 top-0 z-30 min-w-[280px] border-b border-r border-slate-200 bg-slate-50 p-4 align-bottom text-sm font-bold text-slate-600">評価項目</th>{targets.map((target) => <th key={target.evaluation.id} className="sticky top-0 z-20 min-w-[220px] border-b border-r border-slate-200 bg-slate-50 p-4 text-center"><div className="text-lg font-bold text-ink">{target.staff.name}</div><div className="mt-1 rounded bg-mint px-2 py-1 text-xs font-bold text-clinic">{typeLabel(target.evaluation)}</div></th>)}</tr></thead><tbody>{sectionItems.map((item) => <tr key={item.id}><th className="sticky left-0 z-10 min-w-[280px] border-b border-r border-slate-200 bg-white p-4 align-top"><div className="text-base font-bold text-ink">{item.item_name}</div><div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{item.criteria}</div></th>{targets.map((target) => <td key={target.evaluation.id + '-' + item.id} className="min-w-[220px] border-b border-r border-slate-200 bg-paper/50 p-3 align-top">{cell(target, item)}</td>)}</tr>)}</tbody></table></div></section>)}</div>{selfTarget ? <section className="rounded border-2 border-clinic/20 bg-white p-5 shadow-soft"><div className="border-b border-slate-200 pb-4"><h2 className="text-2xl font-bold">{selfTarget.staff.name}（自己評価）</h2><p className="mt-1 text-sm text-slate-600">このコメントは自分の自己評価にだけ保存されます。他スタッフへの評価にはコメント欄を表示しません。</p></div><div className="mt-5 grid gap-4 md:grid-cols-2">{selfCommentFields.map((field) => <label key={field} className="space-y-2"><span className="font-bold text-ink">{field}</span><textarea value={selfComments[field] ?? ""} onChange={(event) => setSelfComments((current) => ({ ...current, [field]: event.target.value }))} className="min-h-32 w-full rounded border border-slate-300 bg-white p-4 text-base leading-7 outline-none focus:border-clinic focus:ring-2 focus:ring-clinic/20" /></label>)}</div></section> : null}{saveMessage ? <div className={(saveMessage.includes("できません") || saveMessage.includes("失敗") ? "border-red-200 bg-red-50 text-red-700" : "border-teal-200 bg-mint text-clinic") + " rounded border px-4 py-3 font-bold"}>{saveMessage}</div> : null}<div className="sticky bottom-0 -mx-5 border-t bg-paper/95 p-4 backdrop-blur"><button type="button" onClick={save} disabled={saving} className="flex min-h-16 w-full items-center justify-center gap-2 rounded bg-clinic px-6 py-5 text-xl font-bold text-white disabled:opacity-60"><Save />{saving ? "保存中..." : (isDirectorMode ? "院長評価を保存" : "360°評価を保存")}</button></div></div>;
+  return (
+    <div className="space-y-5 pb-24 md:pb-0">
+      <section className="rounded border border-teal-900/10 bg-white p-4 shadow-soft sm:p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold md:text-3xl">{isDirectorMode ? "院長評価" : "360°評価"}</h1>
+            <p className="mt-1 text-sm leading-6 text-slate-600 md:text-base">短時間で全員の点数を入力する画面です。他人評価のコメント欄は表示しません。</p>
+            <p className="mt-2 text-sm font-bold leading-6 text-clinic">一括設定は、入力可能な全スタッフ・全評価項目が対象です。対象外の項目には反映しません。</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:flex md:flex-wrap">
+            <button type="button" onClick={() => bulkSet(items, 3, "empty", "未入力の評価項目だけ3点にします。よろしいですか？")} className="min-h-14 rounded border border-clinic bg-white px-5 py-4 text-base font-bold text-clinic shadow-soft md:text-lg">未入力だけ3点</button>
+            <button type="button" onClick={() => bulkSet(items, 3, "overwrite", "入力可能な全スタッフ・全評価項目を3点に上書きします。よろしいですか？")} className="min-h-14 rounded bg-clinic px-5 py-4 text-base font-bold text-white shadow-soft md:text-lg">全項目を3点に上書き</button>
+          </div>
+        </div>
+        <div className="mt-4 rounded border border-teal-100 bg-mint/50 px-4 py-3 text-sm font-bold leading-6 text-clinic">対象: 入力可能セル {inputtableCellCount} 件。「未入力だけ3点」は入力済みと評価しないを変更しません。「全項目を3点に上書き」は既存点も変更します。</div>
+        {bulkMessage ? <div className="mt-3 rounded border border-teal-200 bg-white px-4 py-3 text-sm font-bold leading-6 text-clinic">{bulkMessage}</div> : null}
+      </section>
+
+      <div className="space-y-6">
+        {Object.entries(grouped).map(([section, sectionItems]) => (
+          <section key={section} className="rounded border border-teal-900/10 bg-white p-3 shadow-soft sm:p-4">
+            <div className="mb-4 space-y-3 md:flex md:flex-wrap md:items-center md:justify-between md:gap-3 md:space-y-0">
+              <h2 className="text-xl font-bold md:text-2xl">{section}</h2>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6 md:flex md:flex-wrap">
+                <button type="button" onClick={() => bulkSet(sectionItems, 3, "overwrite", "「" + section + "」を全員3点に変更します。よろしいですか？")} className="col-span-3 min-h-12 rounded bg-mint px-3 py-3 text-sm font-bold text-clinic sm:col-span-1 md:px-4 md:text-base">このセクションを3点</button>
+                {scoreOptions.map((score) => (
+                  <button key={score} type="button" onClick={() => bulkSet(sectionItems, score, "overwrite", "「" + section + "」を全員" + score + "点に変更します。よろしいですか？")} className="min-h-12 rounded border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-ink md:px-4 md:text-base">{score}点</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4 md:hidden">
+              {sectionItems.map((item) => (
+                <article key={item.id} className="rounded border border-slate-200 bg-paper/50 p-4">
+                  <div className="rounded bg-white p-3">
+                    <h3 className="text-base font-bold text-ink">{item.item_name}</h3>
+                    {item.criteria ? <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{item.criteria}</p> : null}
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {targets.map((target) => (
+                      <div key={target.evaluation.id + "-mobile-" + item.id} className="rounded border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="font-bold text-ink">{target.staff.name}</div>
+                          <div className="rounded bg-mint px-2 py-1 text-xs font-bold text-clinic">{typeLabel(target.evaluation)}</div>
+                        </div>
+                        {cell(target, item, true)}
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="hidden max-h-[72vh] overflow-auto rounded border border-slate-200 md:block">
+              <table className="border-separate border-spacing-0 text-left">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 top-0 z-30 min-w-[280px] border-b border-r border-slate-200 bg-slate-50 p-4 align-bottom text-sm font-bold text-slate-600">評価項目</th>
+                    {targets.map((target) => (
+                      <th key={target.evaluation.id} className="sticky top-0 z-20 min-w-[220px] border-b border-r border-slate-200 bg-slate-50 p-4 text-center">
+                        <div className="text-lg font-bold text-ink">{target.staff.name}</div>
+                        <div className="mt-1 rounded bg-mint px-2 py-1 text-xs font-bold text-clinic">{typeLabel(target.evaluation)}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sectionItems.map((item) => (
+                    <tr key={item.id}>
+                      <th className="sticky left-0 z-10 min-w-[280px] border-b border-r border-slate-200 bg-white p-4 align-top">
+                        <div className="text-base font-bold text-ink">{item.item_name}</div>
+                        <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{item.criteria}</div>
+                      </th>
+                      {targets.map((target) => <td key={target.evaluation.id + "-" + item.id} className="min-w-[220px] border-b border-r border-slate-200 bg-paper/50 p-3 align-top">{cell(target, item)}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {selfTarget ? (
+        <section className="rounded border-2 border-clinic/20 bg-white p-4 shadow-soft sm:p-5">
+          <div className="border-b border-slate-200 pb-4">
+            <h2 className="text-xl font-bold md:text-2xl">{selfTarget.staff.name}（自己評価）</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">このコメントは自分の自己評価にだけ保存されます。他スタッフへの評価にはコメント欄を表示しません。</p>
+          </div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            {selfCommentFields.map((field) => (
+              <label key={field} className="space-y-2">
+                <span className="font-bold text-ink">{field}</span>
+                <textarea value={selfComments[field] ?? ""} onChange={(event) => setSelfComments((current) => ({ ...current, [field]: event.target.value }))} className="min-h-32 w-full rounded border border-slate-300 bg-white p-4 text-base leading-7 outline-none focus:border-clinic focus:ring-2 focus:ring-clinic/20" />
+              </label>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {saveMessage ? <div className={(saveMessage.includes("できません") || saveMessage.includes("失敗") ? "border-red-200 bg-red-50 text-red-700" : "border-teal-200 bg-mint text-clinic") + " rounded border px-4 py-3 font-bold"}>{saveMessage}</div> : null}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-paper/95 p-3 backdrop-blur md:sticky md:-mx-5 md:p-4">
+        <button type="button" onClick={save} disabled={saving} className="flex min-h-14 w-full items-center justify-center gap-2 rounded bg-clinic px-6 py-4 text-lg font-bold text-white disabled:opacity-60 md:min-h-16 md:py-5 md:text-xl"><Save />{saving ? "保存中..." : (isDirectorMode ? "院長評価を保存" : "360°評価を保存")}</button>
+      </div>
+    </div>
+  );
 }
