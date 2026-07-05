@@ -379,7 +379,11 @@ function normalizeIds(data: AppData) {
     const fallbackPassword = user.pin || (isDirectorRole(user.role) ? defaultDirectorPassword : defaultStaffPassword);
     return { ...user, password_hash: user.password_hash || hashPassword(fallbackPassword), pin: undefined };
   });
-  data.evaluations = data.evaluations.map((evaluation) => ({ ...evaluation, evaluator_user_id: evaluation.evaluator_user_id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? null, is_360: evaluation.is_360 ? 1 : 0, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null }));
+  data.evaluations = data.evaluations.map((evaluation) => {
+    const evaluatorUser = evaluation.evaluator_user_id ? data.users.find((user) => user.id === evaluation.evaluator_user_id) : null;
+    const evaluatorStaffUser = evaluation.evaluator_staff_id ? data.users.find((user) => user.staff_id === evaluation.evaluator_staff_id && user.role === "staff") : null;
+    return { ...evaluation, evaluator_user_id: evaluation.evaluator_user_id ?? evaluatorStaffUser?.id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? evaluatorUser?.staff_id ?? null, is_360: evaluation.is_360 ? 1 : 0, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null };
+  });
   data.evaluation_scores = data.evaluation_scores.map((score) => ({ ...score, not_applicable: score.not_applicable ? 1 : 0 }));
   data.evaluation_items = data.evaluation_items.map((item) => ({ ...item, target_roles: normalizeTargetRoles(Array.isArray(item.target_roles) ? item.target_roles : []) }));
   ensureEvaluationCycles(data);
@@ -446,6 +450,13 @@ async function loadData(): Promise<AppData> {
 }
 let store = await loadData();
 async function persist() { normalizeIds(store); await saveData(store); }
+export async function refreshStoreFromRemote() {
+  if (!isSupabaseConfigured()) return;
+  const supabaseData = await loadSupabaseAppData();
+  if (!supabaseData) return;
+  store = fromSupabaseAppData(supabaseData);
+  normalizeIds(store);
+}
 function withStaffName(evaluation: Evaluation): Evaluation { const staff = store.staff.find((person) => person.id === evaluation.staff_id); const evaluatorStaff = evaluation.evaluator_staff_id ? store.staff.find((person) => person.id === evaluation.evaluator_staff_id) : null; const cycle = evaluation.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === evaluation.evaluation_cycle_id) : null; return { ...evaluation, staff_name: staff?.name ?? "", evaluator_staff_name: evaluatorStaff?.name ?? evaluation.evaluator_name ?? "", evaluation_cycle_name: cycle?.name ?? null }; }
 function staffHasEvaluations(staffId: number) { return store.evaluations.some((evaluation) => evaluation.staff_id === staffId); }
 function syncStaffUser(staff: Staff) {
@@ -661,7 +672,17 @@ export async function updateEvaluation(id: number, payload: { scores: Array<{ it
 function currentEvaluationMonth() { return new Date().toISOString().slice(0, 7); }
 function currentEntryDate() { return new Date().toISOString().slice(0, 10); }
 function get360EvaluationType(user: CurrentUser, staffId: number): EvaluationType { if (isDirectorRole(user.role)) return "director"; return user.staff_id === staffId ? "self" : "peer"; }
-function find360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), cycleId: number | null = getActiveCycleInternal()?.id ?? null) { return store.evaluations.find((evaluation) => evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id && evaluation.staff_id === staffId && ((cycleId && evaluation.evaluation_cycle_id === cycleId) || (!evaluation.evaluation_cycle_id && evaluation.evaluation_month === month))); }
+function isEvaluationOwnedByUser(evaluation: Evaluation, user: CurrentUser) {
+  if (evaluation.evaluator_user_id !== null && evaluation.evaluator_user_id !== undefined && evaluation.evaluator_user_id === user.id) return true;
+  if (evaluation.evaluator_staff_id !== null && evaluation.evaluator_staff_id !== undefined && user.staff_id !== null && evaluation.evaluator_staff_id === user.staff_id) return true;
+  return false;
+}
+export function canUserEditEvaluationRecord(user: CurrentUser, evaluation: Evaluation) {
+  if (isDirectorRole(user.role)) return true;
+  if (evaluation.evaluation_type === "self" && evaluation.staff_id === user.staff_id) return true;
+  return evaluation.is_360 === 1 && isEvaluationOwnedByUser(evaluation, user);
+}
+function find360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), cycleId: number | null = getActiveCycleInternal()?.id ?? null) { return store.evaluations.find((evaluation) => evaluation.is_360 === 1 && isEvaluationOwnedByUser(evaluation, user) && evaluation.staff_id === staffId && ((cycleId && evaluation.evaluation_cycle_id === cycleId) || (!evaluation.evaluation_cycle_id && evaluation.evaluation_month === month))); }
 export async function getOrCreate360Evaluation(user: CurrentUser, staffId: number, month = currentEvaluationMonth(), entryDate = currentEntryDate(), cycleId = getActiveCycleInternal()?.id ?? null) {
   const cycle = cycleId ? store.evaluation_cycles.find((item) => item.id === cycleId) : getActiveCycleInternal();
   const evaluationMonth = cycle ? cycleMonth(cycle) : month;

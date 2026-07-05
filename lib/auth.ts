@@ -45,7 +45,10 @@ export function canViewEvaluation(user: CurrentUser, evaluation: Evaluation) {
 export function canEditEvaluation(user: CurrentUser, evaluation: Evaluation) {
   if (isDirectorRole(user.role)) return true;
   if (canViewEvaluation(user, evaluation)) return true;
-  return evaluation.is_360 === 1 && evaluation.evaluator_user_id === user.id;
+  if (evaluation.is_360 !== 1) return false;
+  if (evaluation.evaluator_user_id !== null && evaluation.evaluator_user_id !== undefined && evaluation.evaluator_user_id === user.id) return true;
+  if (evaluation.evaluator_staff_id !== null && evaluation.evaluator_staff_id !== undefined && user.staff_id !== null && evaluation.evaluator_staff_id === user.staff_id) return true;
+  return false;
 }
 
 export function canCreateEvaluationFor(user: CurrentUser, staffId: number, evaluationType: Evaluation["evaluation_type"]) {

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Evaluation360Matrix } from "@/components/Evaluation360Matrix";
 import { RatingCriteriaAccordion } from "@/components/RatingCriteriaAccordion";
 import { getCurrentUser } from "@/lib/auth";
-import { getActiveEvaluationCycle, getEvaluation, getEvaluationItems, getEvaluationScores, getOrCreate360Evaluation, getStaffList } from "@/lib/db";
+import { getActiveEvaluationCycle, getEvaluation, getEvaluationItems, getEvaluationScores, getOrCreate360Evaluation, getStaffList, refreshStoreFromRemote } from "@/lib/db";
 import { parseComments } from "@/lib/scoring";
 import { isDirectorRole } from "@/lib/permissions";
 
@@ -33,6 +33,7 @@ export default async function Evaluation360Page({ searchParams }: { searchParams
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   const query = searchParams ? await searchParams : {};
+  await refreshStoreFromRemote();
   const staff = getStaffList();
   const items = getEvaluationItems();
   const activeCycle = getActiveEvaluationCycle();
