@@ -16,7 +16,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const navItems = isDirector
     ? [
         { label: "新規評価", href: "/evaluations/new" },
-        { label: "評価管理", href: "/360" },
+        { label: "評価管理", href: "/director-evaluation" },
         { label: "評価結果", href: "/360/results" },
         { label: "賞与計算", href: "/bonus" },
       ]
