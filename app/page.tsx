@@ -20,9 +20,9 @@ const directorCards: DirectorCard[] = [
     icon: Users,
   },
   {
-    title: "評価管理",
-    description: "院長評価・360°評価・回答状況・評価の削除を管理します。",
-    href: "/360",
+    title: "院長評価",
+    description: "スタッフごとの院長評価を入力・編集します。",
+    href: "/director-evaluation",
     icon: ClipboardList,
     accent: true,
   },
