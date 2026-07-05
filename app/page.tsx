@@ -13,7 +13,7 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
   const query = searchParams ? await searchParams : {};
   const isDirector = isDirectorRole(user.role);
   const staff = isDirector ? getStaffList() : [];
-  const evaluations = isDirector ? getEvaluations().slice(0, 10) : [];
+  const evaluations = isDirector ? getEvaluations().slice(0, 50) : [];
 
   if (!isDirector) {
     return <div className="space-y-6"><section className="rounded border border-teal-900/10 bg-white p-6 shadow-soft"><h1 className="text-3xl font-bold">スタッフ画面</h1><p className="mt-2 text-slate-600">360°評価の入力と、自分の成長サマリーを確認できます。評価者が分かる情報は表示しません。</p></section><section className="grid gap-4 md:grid-cols-3"><Link href="/360" className="flex min-h-40 items-center gap-4 rounded bg-clinic p-7 text-xl font-bold text-white shadow-soft"><UserCheck size={30} />360°評価を開始</Link><Link href="/my-evaluations" className="flex min-h-40 items-center gap-4 rounded border border-teal-900/10 bg-white p-7 text-xl font-bold shadow-soft"><Edit3Icon />自分が入力した評価を編集</Link><Link href="/growth" className="flex min-h-40 items-center gap-4 rounded border border-teal-900/10 bg-white p-7 text-xl font-bold shadow-soft"><Sparkles />成長サマリーを見る</Link><Link href="/evaluation-history" className="flex min-h-40 items-center gap-4 rounded border border-teal-900/10 bg-white p-7 text-xl font-bold shadow-soft"><History />評価履歴</Link></section></div>;
