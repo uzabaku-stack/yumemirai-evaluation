@@ -53,6 +53,10 @@ function percent(value: number) {
   return Math.round(value * 100) + "%";
 }
 
+function fmt(value: number | null) {
+  return value === null || !Number.isFinite(value) ? "-" : value.toFixed(2);
+}
+
 function evaluationCoefficient(average: number | null) {
   if (average === null) return 0.8;
   if (average >= 4.5) return 1.2;
@@ -221,12 +225,7 @@ export function BonusCalculator({ staff }: Props) {
     if (mode !== "pool") return baseRows;
 
     const poolFinalBonuses = distributePoolByWeight(totalPoolValue, baseRows.map((row) => row.poolWeight), baseRows.map((row) => row.adjustment.individualAdjustmentAmount));
-    return baseRows.map((row, index) => {
-      const finalBonus = poolFinalBonuses[index] ?? 0;
-      const evaluationAdjustedBonus = row.adjustment.evaluationMultiplier * row.baseBonus;
-      const calculatedFinalBeforePool = row.adjustment.finalBonus;
-      return { ...row, finalBonus, evaluationAdjustedBonus, calculatedFinalBeforePool };
-    });
+    return baseRows.map((row, index) => ({ ...row, finalBonus: poolFinalBonuses[index] ?? 0 }));
   }, [staff, rows, mode, totalPool]);
 
   const totalBonus = calculated.reduce((sum, row) => sum + row.finalBonus, 0);
@@ -251,7 +250,7 @@ export function BonusCalculator({ staff }: Props) {
   }
 
   function exportCsv() {
-    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "均等配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "補正後参考額", "最終賞与額", "メモ"];
+    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "均等配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "総合補正後", "最終賞与", "メモ"];
     const body = calculated.map((row) => [
       mode === "base" ? "基準賞与から計算" : "総賞与額から自動配分",
       row.person.name,
@@ -297,7 +296,7 @@ export function BonusCalculator({ staff }: Props) {
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">総賞与額</div>
           <input inputMode="numeric" value={totalPool} onChange={(event) => setTotalPool(event.target.value)} disabled={mode !== "pool"} className="mt-3 h-14 w-full rounded border border-slate-300 px-4 text-right text-xl font-bold disabled:bg-slate-100 disabled:text-slate-400" placeholder="例 4200000" />
-          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、総賞与額を補正後重みに応じて必ず全額配分します。</p>
+          <p className="mt-2 text-xs text-slate-500">自動配分モードでは、総賞与額を賞与原資として全額配分します。</p>
         </div>
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">最終賞与合計</div>
@@ -309,9 +308,8 @@ export function BonusCalculator({ staff }: Props) {
       <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold">賞与計算表</h2>
-            <p className="mt-1 text-sm text-slate-600">自動配分モードでは、総賞与額を賞与原資として、評価標準化・総合補正・個別調整を反映した重みに応じて全額配分します。</p>
-            <p className="mt-1 text-sm text-slate-600">基準賞与額は均等配分額を初期値として表示し、スタッフごとに手動上書きできます。</p>
+            <h2 className="text-xl font-bold">賞与計算一覧</h2>
+            <p className="mt-1 text-sm text-slate-600">通常表示は必要な金額だけに絞り、総合補正の詳細と入力欄は折りたたみ内にまとめています。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={saveLocal} className="flex min-h-12 items-center gap-2 rounded border border-clinic px-5 py-3 font-bold text-clinic"><Save size={18} />この端末に保存</button>
@@ -320,54 +318,55 @@ export function BonusCalculator({ staff }: Props) {
           {savedMessage ? <div className="w-full rounded bg-mint px-4 py-3 font-bold text-clinic">{savedMessage}</div> : null}
         </div>
 
-        <div className="mt-5 space-y-4">
+        <div className="mt-5 space-y-3">
           {calculated.map((row) => (
             <article key={row.person.id} className="rounded border border-slate-200 bg-white p-4">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
+              <div className="grid gap-3 lg:grid-cols-[1.4fr_repeat(4,minmax(120px,1fr))] lg:items-center">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-xl font-bold text-ink">{row.person.name}</h3>
+                    <h3 className="truncate text-xl font-bold text-ink">{row.person.name}</h3>
                     <span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{row.person.role}</span>
-                    {mode === "pool" ? <span className={(row.usesAutoBaseBonus ? "bg-mint text-clinic" : "bg-amber-50 text-amber-700") + " rounded px-3 py-1 text-sm font-bold"}>{row.usesAutoBaseBonus ? "均等基準" : "個別上書き"}</span> : null}
-                  </div>
-                  <div className="mt-2 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
-                    <span>評価平均: <b>{row.person.averageScore === null ? "-" : row.person.averageScore.toFixed(2)}</b></span>
-                    <span>評価標準化: <b>{row.person.standardizedScore === null ? "-" : row.person.standardizedScore.toFixed(2)}</b></span>
-                    <span>賞与反映評価: <b>{row.person.bonusScore === null ? "-" : row.person.bonusScore.toFixed(2)}</b></span>
+                    {mode === "pool" ? <span className={(row.usesAutoBaseBonus ? "bg-mint text-clinic" : "bg-amber-50 text-amber-700") + " rounded px-3 py-1 text-xs font-bold"}>{row.usesAutoBaseBonus ? "自動配分" : "個別上書き"}</span> : null}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-bold text-slate-500">最終賞与</div>
-                  <div className="text-3xl font-bold text-clinic">{yen(row.finalBonus)}</div>
+                <SummaryValue label="評価平均" value={fmt(row.person.averageScore)} />
+                <SummaryValue label="評価標準化" value={fmt(row.person.standardizedScore)} />
+                <SummaryValue label="総合補正後" value={yen(row.adjustment.finalBonus)} />
+                <div className="rounded bg-mint px-4 py-3 text-right">
+                  <div className="text-xs font-bold text-clinic">最終賞与</div>
+                  <div className="text-2xl font-bold text-clinic">{yen(row.finalBonus)}</div>
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 lg:grid-cols-[160px_220px_1fr_180px]">
-                <label className="space-y-1"><span className="text-sm font-bold text-slate-600">基本給</span><input inputMode="numeric" value={row.input.baseSalary} onChange={(event) => update(row.person.id, { baseSalary: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 250000" /></label>
-                <label className="space-y-1">
-                  <span className="text-sm font-bold text-slate-600">基準賞与額</span>
-                  <div className="flex gap-2">
-                    <input inputMode="numeric" value={mode === "pool" && row.usesAutoBaseBonus ? String(Math.round(row.suggestedBaseBonus)) : row.input.baseBonus} onChange={(event) => updateBaseBonus(row.person.id, event.target.value)} className="h-12 min-w-0 flex-1 rounded border border-slate-300 px-3 text-right" placeholder="例 300000" />
-                    {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="均等配分額に戻す"><RotateCcw size={18} /></button> : null}
-                  </div>
-                  {mode === "pool" ? <span className="block text-xs text-slate-500">均等配分額: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
-                </label>
-                <div className="grid gap-2 rounded bg-mint/60 p-3 text-sm md:grid-cols-4">
-                  <div><div className="text-slate-600">基準賞与</div><b>{yen(row.baseBonus)}</b></div>
-                  <div><div className="text-slate-600">評価反映後</div><b>{yen(row.adjustment.evaluationAdjustedBonus)}</b></div>
-                  <div><div className="text-slate-600">補正後参考額</div><b>{yen(row.adjustment.finalBonus)}</b></div>
-                  <div><div className="text-slate-600">最終配分額</div><b>{yen(row.finalBonus)}</b></div>
+              <details className="mt-3 rounded border border-slate-200 bg-slate-50 p-4">
+                <summary className="cursor-pointer text-base font-bold text-ink">総合補正の詳細・入力欄を開く</summary>
+                <div className="mt-4 grid gap-4 lg:grid-cols-[160px_220px_1fr]">
+                  <label className="space-y-1">
+                    <span className="text-sm font-bold text-slate-600">基本給</span>
+                    <input inputMode="numeric" value={row.input.baseSalary} onChange={(event) => update(row.person.id, { baseSalary: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 250000" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-sm font-bold text-slate-600">基準賞与額</span>
+                    <div className="flex gap-2">
+                      <input inputMode="numeric" value={mode === "pool" && row.usesAutoBaseBonus ? String(Math.round(row.suggestedBaseBonus)) : row.input.baseBonus} onChange={(event) => updateBaseBonus(row.person.id, event.target.value)} className="h-12 min-w-0 flex-1 rounded border border-slate-300 px-3 text-right" placeholder="例 300000" />
+                      {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="自動配分額に戻す"><RotateCcw size={18} /></button> : null}
+                    </div>
+                    {mode === "pool" ? <span className="block text-xs text-slate-500">均等配分額: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-sm font-bold text-slate-600">メモ</span>
+                    <input value={row.input.memo} onChange={(event) => update(row.person.id, { memo: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3" placeholder="メモ" />
+                  </label>
                 </div>
-                <label className="space-y-1"><span className="text-sm font-bold text-slate-600">メモ</span><input value={row.input.memo} onChange={(event) => update(row.person.id, { memo: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3" placeholder="メモ" /></label>
-              </div>
 
-              <details className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
-                <summary className="cursor-pointer text-base font-bold text-ink">総合補正の詳細を開く</summary>
                 <div className="mt-4 grid gap-4 lg:grid-cols-5">
                   <RateSelect id={"employment-" + row.person.id} label="雇用形態補正" value={row.input.employmentAdjustmentRate} onChange={(value) => update(row.person.id, { employmentAdjustmentRate: value })} />
                   <RateSelect id={"work-hours-" + row.person.id} label="勤務時間補正" value={row.input.workHoursAdjustmentRate} onChange={(value) => update(row.person.id, { workHoursAdjustmentRate: value })} />
                   <RateSelect id={"attendance-" + row.person.id} label="出勤日数補正" value={row.input.attendanceAdjustmentRate} onChange={(value) => update(row.person.id, { attendanceAdjustmentRate: value })} />
-                  <label className="space-y-1"><span className="text-sm font-bold text-slate-600">個別調整</span><input inputMode="numeric" value={row.input.individualAdjustmentAmount} onChange={(event) => update(row.person.id, { individualAdjustmentAmount: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 -10000" /></label>
+                  <label className="space-y-1">
+                    <span className="text-sm font-bold text-slate-600">個別調整</span>
+                    <input inputMode="numeric" value={row.input.individualAdjustmentAmount} onChange={(event) => update(row.person.id, { individualAdjustmentAmount: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 -10000" />
+                  </label>
                   <div className="rounded bg-white p-3 text-sm leading-7">
                     <div>評価標準化補正: <b>{percent(row.adjustment.evaluationMultiplier)}</b></div>
                     <div>雇用形態補正: <b>{percent(row.adjustment.employmentMultiplier)}</b></div>
@@ -377,7 +376,13 @@ export function BonusCalculator({ staff }: Props) {
                     <div>個別調整: <b>{yen(row.adjustment.individualAdjustmentAmount)}</b></div>
                   </div>
                 </div>
-                <p className="mt-3 text-sm text-slate-600">自動配分モードでは、基準賞与額 × 評価標準化補正 × 総合補正を重みとして計算し、賞与原資を全額再配分します。</p>
+
+                <div className="mt-4 grid gap-3 rounded bg-mint/60 p-3 text-sm md:grid-cols-4">
+                  <div><div className="text-slate-600">基準賞与</div><b>{yen(row.baseBonus)}</b></div>
+                  <div><div className="text-slate-600">評価反映後</div><b>{yen(row.adjustment.evaluationAdjustedBonus)}</b></div>
+                  <div><div className="text-slate-600">総合補正後</div><b>{yen(row.adjustment.finalBonus)}</b></div>
+                  <div><div className="text-slate-600">最終賞与</div><b>{yen(row.finalBonus)}</b></div>
+                </div>
               </details>
             </article>
           ))}
@@ -386,13 +391,26 @@ export function BonusCalculator({ staff }: Props) {
 
       <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
         <h2 className="text-xl font-bold">補正計算の考え方</h2>
-        <p className="mt-2 text-sm leading-7 text-slate-600">基準賞与額に評価標準化補正と総合補正を掛けた値をスタッフごとの重みとして扱います。自動配分モードでは、その重みに応じて総賞与額を全額配分し、円単位の差額も調整します。計算ロジックは <code className="rounded bg-slate-100 px-2 py-1">lib/bonusAdjustment.ts</code> に独立しています。</p>
+        <p className="mt-2 text-sm leading-7 text-slate-600">
+          基準賞与額に評価標準化補正と総合補正を掛けた値をスタッフごとの重みとして扱います。自動配分モードでは、その重みに応じて総賞与額を全額配分し、円単位の差額も調整します。計算ロジックは <code className="rounded bg-slate-100 px-2 py-1">lib/bonusAdjustment.ts</code> に独立しています。
+        </p>
       </section>
 
       <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
         <h2 className="text-xl font-bold">評価標準化補正</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-5">{["4.5以上: 120%", "4.0以上: 110%", "3.5以上: 100%", "3.0以上: 90%", "3.0未満: 80%"].map((item) => <div key={item} className="rounded bg-slate-50 p-4 text-center font-bold text-ink">{item}</div>)}</div>
+        <div className="mt-4 grid gap-3 md:grid-cols-5">
+          {["4.5以上: 120%", "4.0以上: 110%", "3.5以上: 100%", "3.0以上: 90%", "3.0未満: 80%"].map((item) => <div key={item} className="rounded bg-slate-50 p-4 text-center font-bold text-ink">{item}</div>)}
+        </div>
       </section>
+    </div>
+  );
+}
+
+function SummaryValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded bg-slate-50 px-4 py-3 text-right">
+      <div className="text-xs font-bold text-slate-500">{label}</div>
+      <div className="text-xl font-bold text-ink">{value}</div>
     </div>
   );
 }

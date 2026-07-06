@@ -30,13 +30,6 @@ function average(values: Array<number | null | undefined>) {
   return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null;
 }
 
-function typeLabel(type: string) {
-  if (type === "self") return "自己評価";
-  if (type === "peer") return "360°評価";
-  if (type === "director") return "院長評価";
-  return "その他評価";
-}
-
 function diffText(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "-";
   return (value > 0 ? "+" : "") + value.toFixed(2);
@@ -90,7 +83,8 @@ export default async function EvaluationResultPage({ params }: { params: Promise
   const ratingCriteriaText = getRatingCriteriaText();
   const cycleSummary = evaluation.evaluation_cycle_id ? get360SummaryForCycle(evaluation.evaluation_cycle_id) : get360Summary(evaluation.evaluation_month);
   const staffSummary = cycleSummary.staff_summaries.find((row) => row.staff.id === evaluation.staff_id);
-  const itemRows: ItemRow[] = (staffSummary?.item_breakdown.length ? staffSummary.item_breakdown : fallbackItemRows(evaluation.id)).sort((a, b) => a.section_name.localeCompare(b.section_name, "ja") || a.item_order - b.item_order || a.item_name.localeCompare(b.item_name, "ja"));
+  const itemRows: ItemRow[] = (staffSummary?.item_breakdown.length ? staffSummary.item_breakdown : fallbackItemRows(evaluation.id))
+    .sort((a, b) => a.section_name.localeCompare(b.section_name, "ja") || a.item_order - b.item_order || a.item_name.localeCompare(b.item_name, "ja"));
   const rankedItems = itemRows.filter((item): item is ItemRow & { overall_average: number } => item.overall_average !== null && Number.isFinite(item.overall_average));
   const strengths = [...rankedItems].sort((a, b) => b.overall_average - a.overall_average).slice(0, 3);
   const improvements = [...rankedItems].sort((a, b) => a.overall_average - b.overall_average).slice(0, 3);
@@ -120,8 +114,10 @@ export default async function EvaluationResultPage({ params }: { params: Promise
       <section className="grid gap-5 xl:grid-cols-[420px_1fr]">
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <h2 className="text-xl font-bold">項目別平均レーダーチャート</h2>
-          <p className="mt-1 text-sm text-slate-600">項目別平均点を使った個人別チャートです。項目が多い場合は上位16項目を表示します。</p>
-          {radarItems.length ? <ThemeRadarChart themes={radarItems.map((item) => item.item_name)} series={[{ label: "項目平均", color: "#0f766e", values: radarItems.map((item) => ({ theme: item.item_name, average: item.overall_average })) }]} /> : <p className="mt-4 text-sm text-slate-500">表示できる項目別平均がありません。</p>}
+          <p className="mt-1 text-sm text-slate-600">個人の項目別平均を使ったチャートです。項目が多い場合は上位16項目を表示します。</p>
+          {radarItems.length ? (
+            <ThemeRadarChart themes={radarItems.map((item) => item.item_name)} series={[{ label: "項目別平均", color: "#0f766e", values: radarItems.map((item) => ({ theme: item.item_name, average: item.overall_average })) }]} />
+          ) : <p className="mt-4 text-sm text-slate-500">表示できる項目別平均がありません。</p>}
         </div>
 
         <div className="grid gap-5 md:grid-cols-2">
@@ -158,8 +154,8 @@ export default async function EvaluationResultPage({ params }: { params: Promise
       </section>
 
       <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
-        <h2 className="text-xl font-bold">項目別平均点一覧</h2>
-        <p className="mt-1 text-sm text-slate-600">各評価項目について、自己評価・360°評価平均・院長評価・項目別平均点・医院平均との差を表示します。</p>
+        <h2 className="text-xl font-bold">項目別平均一覧</h2>
+        <p className="mt-1 text-sm text-slate-600">各評価項目について、自己評価・360°評価平均・院長評価・項目別平均・医院平均との差を表示します。</p>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[1040px] text-left">
             <thead>
@@ -169,7 +165,7 @@ export default async function EvaluationResultPage({ params }: { params: Promise
                 <th className="text-center">自己評価</th>
                 <th className="text-center">360°評価平均</th>
                 <th className="text-center">院長評価</th>
-                <th className="text-center">項目別平均点</th>
+                <th className="text-center">項目別平均</th>
                 <th className="text-center">医院平均</th>
                 <th className="text-center">平均との差</th>
               </tr>
@@ -186,7 +182,7 @@ export default async function EvaluationResultPage({ params }: { params: Promise
                   <td className="text-center">{fmt(item.clinic_average)}</td>
                   <td className={(item.difference_from_average ?? 0) < 0 ? "text-center font-bold text-red-600" : "text-center font-bold text-clinic"}>{diffText(item.difference_from_average)}</td>
                 </tr>
-              )) : <tr><td colSpan={8} className="py-8 text-center text-slate-500">項目別平均点はまだありません。</td></tr>}
+              )) : <tr><td colSpan={8} className="py-8 text-center text-slate-500">項目別平均はまだありません。</td></tr>}
             </tbody>
           </table>
         </div>

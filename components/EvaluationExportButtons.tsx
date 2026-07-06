@@ -37,6 +37,15 @@ type Props = {
   staffReports?: StaffExportReport[];
 };
 
+type BonusRowInput = {
+  baseBonus?: string;
+  baseBonusMode?: "auto" | "manual";
+  employmentAdjustmentRate?: string;
+  workHoursAdjustmentRate?: string;
+  attendanceAdjustmentRate?: string;
+  individualAdjustmentAmount?: string;
+};
+
 function typeLabel(type: EvaluationType) {
   if (type === "self") return "自己評価";
   if (type === "peer") return "360°評価";
@@ -55,15 +64,6 @@ function fmt(value: number | null | undefined) {
 function yenValue(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "" : Math.round(value);
 }
-
-type BonusRowInput = {
-  baseBonus?: string;
-  baseBonusMode?: "auto" | "manual";
-  employmentAdjustmentRate?: string;
-  workHoursAdjustmentRate?: string;
-  attendanceAdjustmentRate?: string;
-  individualAdjustmentAmount?: string;
-};
 
 function numberValue(value: string | number | null | undefined) {
   const number = Number(String(value ?? "").replace(/,/g, ""));
@@ -233,11 +233,7 @@ export function downloadEvaluationsCsv(evaluations: Evaluation[], fileBaseName =
 }
 
 function xmlEscape(value: string | number | null | undefined) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function columnName(index: number) {
@@ -266,12 +262,12 @@ function worksheetXml(rows: Array<Array<string | number | null | undefined>>, op
   }).join("");
   const filter = options?.sheetMode === "list" ? '<autoFilter ref="A1:' + lastColumn + String(lastRow) + '"/>' : "";
   const pageSetup = options?.sheetMode === "sheet" ? '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>' : "";
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
-    '<sheetFormatPr defaultColWidth="14" defaultRowHeight="18"/>' +
-    '<sheetData>' + body + '</sheetData>' + filter + pageSetup +
-    '</worksheet>';
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+    + '<sheetFormatPr defaultColWidth="14" defaultRowHeight="18"/>'
+    + '<sheetData>' + body + '</sheetData>' + filter + pageSetup
+    + '</worksheet>';
 }
 
 function crc32(bytes: Uint8Array) {

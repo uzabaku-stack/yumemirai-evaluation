@@ -132,17 +132,26 @@ export function EvaluationResultsTable({ evaluations, staffReports = [] }: Props
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-slate-200 bg-slate-50 p-4">
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setSelection(visibleIds)} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><CheckSquare size={18} />全選択</button>
-          <button type="button" onClick={() => setSelection([])} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><Eraser size={18} />選択解除</button>
-          <button type="button" onClick={selectThisMonth} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">今月だけ選択</button>
-          <button type="button" onClick={() => setSelection(visibleIds)} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">表示中のみ選択</button>
-          <EvaluationExportButtons evaluations={evaluations} staffReports={staffReports} fileBaseName="evaluation-results" />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="rounded bg-white px-4 py-3 font-bold text-slate-700">選択中: {selectedCount}件</span>
-          <button type="button" onClick={bulkDelete} disabled={deleting || selectedCount === 0} className="inline-flex min-h-12 items-center gap-2 rounded bg-red-600 px-5 py-3 font-bold text-white disabled:opacity-50"><Trash2 size={18} />選択した評価を削除{selectedCount ? "（" + selectedCount + "件）" : ""}</button>
+      <div className="rounded border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setSelection(visibleIds)} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><CheckSquare size={18} />全選択</button>
+              <button type="button" onClick={() => setSelection([])} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><Eraser size={18} />選択解除</button>
+              <button type="button" onClick={selectThisMonth} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">今月だけ選択</button>
+              <button type="button" onClick={() => setSelection(visibleIds)} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">表示中のみ選択</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <EvaluationExportButtons evaluations={evaluations} staffReports={staffReports} fileBaseName="evaluation-results" />
+              <span className="rounded bg-white px-3 py-2 text-sm font-bold text-slate-600">PDF出力（1人用）とExcel評価シート（1人用）は各行の「︙」から出力できます。</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="rounded bg-white px-4 py-3 font-bold text-slate-700">選択中: {selectedCount}件</span>
+            <button type="button" onClick={bulkDelete} disabled={deleting || selectedCount === 0} className="inline-flex min-h-12 items-center gap-2 rounded bg-red-600 px-5 py-3 font-bold text-white disabled:opacity-50">
+              <Trash2 size={18} />選択した評価を削除{selectedCount ? "（" + selectedCount + "件）" : ""}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -156,7 +165,12 @@ export function EvaluationResultsTable({ evaluations, staffReports = [] }: Props
           </div>
           <div className="mt-3 max-h-80 overflow-y-auto rounded border border-red-100 bg-white">
             <ul className="divide-y divide-red-50">
-              {selectedEvaluations.slice(0, 50).map((evaluation) => <li key={evaluation.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"><span className="font-bold text-ink">{evaluationLabel(evaluation)}</span><span className="text-slate-500">ID: {evaluation.id}</span></li>)}
+              {selectedEvaluations.slice(0, 50).map((evaluation) => (
+                <li key={evaluation.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                  <span className="font-bold text-ink">{evaluationLabel(evaluation)}</span>
+                  <span className="text-slate-500">ID: {evaluation.id}</span>
+                </li>
+              ))}
               {selectedEvaluations.length > 50 ? <li className="px-4 py-3 text-sm font-bold text-slate-600">ほか {selectedEvaluations.length - 50} 件</li> : null}
             </ul>
           </div>
