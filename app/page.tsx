@@ -49,7 +49,7 @@ const directorCards: DirectorCard[] = [
   {
     title: "設定",
     description: "評価項目や各種設定を管理します。",
-    href: "/evaluation-items",
+    href: "/settings",
     icon: Settings,
   },
 ];
