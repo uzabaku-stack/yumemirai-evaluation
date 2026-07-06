@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckSquare, Copy, Download, Edit3, Eraser, Eye, FileText, MoreVertical, Trash2 } from "lucide-react";
+import { CheckSquare, Copy, Download, Edit3, Eraser, Eye, FileSpreadsheet, FileText, MoreVertical, Trash2 } from "lucide-react";
+import { EvaluationExportButtons, downloadEvaluationsXlsx } from "@/components/EvaluationExportButtons";
 import type { Evaluation } from "@/lib/types";
 
 type Props = {
@@ -16,14 +17,14 @@ function currentMonth() {
 }
 
 function evaluationLabel(evaluation: Evaluation) {
-  return [evaluation.staff_name || "氏名未設定", evaluation.evaluation_month, evaluation.entry_date].filter(Boolean).join(" / ");
+  return [evaluation.staff_name || "氏名未設定", evaluation.evaluation_cycle_name || evaluation.evaluation_month, evaluation.entry_date].filter(Boolean).join(" / ");
 }
 
 function typeLabel(type: Evaluation["evaluation_type"]) {
   if (type === "self") return "自己評価";
   if (type === "peer") return "360°評価";
   if (type === "director") return "院長評価";
-  return "他者評価";
+  return "その他評価";
 }
 
 function escapeCsv(value: string | number | null | undefined) {
@@ -36,6 +37,7 @@ function downloadEvaluationCsv(evaluation: Evaluation) {
     ["項目", "内容"],
     ["ID", evaluation.id],
     ["氏名", evaluation.staff_name ?? ""],
+    ["評価期間", evaluation.evaluation_cycle_name ?? ""],
     ["評価年月", evaluation.evaluation_month],
     ["記載日", evaluation.entry_date],
     ["評価種別", typeLabel(evaluation.evaluation_type)],
@@ -164,6 +166,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
           <button type="button" onClick={() => setSelection([])} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><Eraser size={18} />選択解除</button>
           <button type="button" onClick={selectThisMonth} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">今月だけ選択</button>
           <button type="button" onClick={() => setSelection(visibleIds)} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">表示中のみ選択</button>
+          <EvaluationExportButtons evaluations={evaluations} fileBaseName="evaluation-results" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded bg-white px-4 py-3 font-bold text-slate-700">選択中: {selectedCount}件</span>
@@ -194,6 +197,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
             <tr className="border-b text-sm text-slate-500">
               <th className="w-16 py-3"><label className="flex min-h-11 items-center justify-center"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} className="h-5 w-5 rounded border-slate-300" aria-label="すべて選択" /></label></th>
               <th className="py-3">氏名</th>
+              <th>評価期間</th>
               <th>評価年月</th>
               <th>記載日</th>
               <th>評価種別</th>
@@ -207,6 +211,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
               <tr key={evaluation.id} className="border-b last:border-0">
                 <td className="py-3"><label className="flex min-h-12 items-center justify-center"><input type="checkbox" checked={selectedIds.includes(evaluation.id)} onChange={() => toggleOne(evaluation.id)} className="h-5 w-5 rounded border-slate-300" aria-label={(evaluation.staff_name ?? "評価") + "を選択"} /></label></td>
                 <td className="py-4 font-semibold">{evaluation.staff_name}</td>
+                <td>{evaluation.evaluation_cycle_name ?? "-"}</td>
                 <td>{evaluation.evaluation_month}</td>
                 <td>{evaluation.entry_date}</td>
                 <td><span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{typeLabel(evaluation.evaluation_type)}</span></td>
@@ -219,6 +224,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
                       <Link href={"/evaluations/" + evaluation.id} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Eye size={18} />詳細を見る</Link>
                       <Link href={"/evaluations/" + evaluation.id + "/edit"} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Edit3 size={18} />編集</Link>
                       <button type="button" onClick={() => duplicateEvaluation(evaluation)} disabled={duplicatingId === evaluation.id} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50 disabled:opacity-50"><Copy size={18} />{duplicatingId === evaluation.id ? "複製中" : "複製"}</button>
+                      <button type="button" onClick={() => downloadEvaluationsXlsx([evaluation], "evaluation-" + evaluation.id)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><FileSpreadsheet size={18} />Excel出力</button>
                       <button type="button" onClick={() => downloadEvaluationCsv(evaluation)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><Download size={18} />CSV出力</button>
                       <Link href={"/evaluations/" + evaluation.id + "/print"} target="_blank" className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><FileText size={18} />PDF出力</Link>
                       <button type="button" onClick={() => singleDelete(evaluation)} disabled={deleting} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={18} />評価を削除</button>
@@ -226,7 +232,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
                   </details>
                 </td>
               </tr>
-            )) : <tr><td colSpan={8} className="py-8 text-center text-slate-500">表示できる評価はありません。</td></tr>}
+            )) : <tr><td colSpan={9} className="py-8 text-center text-slate-500">表示できる評価はありません。</td></tr>}
           </tbody>
         </table>
       </div>

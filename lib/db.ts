@@ -475,11 +475,14 @@ const sectionAxisMap: Array<{ theme: EvaluationTheme; keywords: string[] }> = [
   { theme: "臨床スキル", keywords: ["臨床スキル", "臨床", "SRP", "TBI", "メインテナンス", "口腔", "印象", "Tec", "TEC"] },
   { theme: "技工・機器関連スキル", keywords: ["技工", "機器", "スキャナー", "CAD", "CAM", "模型"] },
   { theme: "矯正関連スキル", keywords: ["矯正", "インビザ", "ワイヤー", "ブラケット", "リテーナー", "プレオルソ"] },
-  { theme: "外科・診療補助スキル", keywords: ["外科", "診療補助", "抜歯", "アシスト", "CR", "服薬", "器具"] },
-  { theme: "接遇・事務対応", keywords: ["接遇", "事務", "患者応対", "予約", "会計", "電話", "清掃"] },
+  { theme: "外科・診療補助スキル", keywords: ["外科", "診療補助", "抜歯", "アシスト", "CR", "根管", "器具"] },
+  { theme: "接遇・事務対応", keywords: ["接遇", "事務", "患者対応", "予約", "会計", "電話", "清掃"] },
   { theme: "チーム・貢献姿勢", keywords: ["チーム", "貢献", "報告", "連絡", "相談", "教育", "自己研鑽", "改善", "Line", "礼儀"] },
 ];
 function themeForScore(score: Pick<EvaluationScore, "section_name" | "item_name">) {
+  const section = String(score.section_name ?? "");
+  const direct = evaluationThemes.find((theme) => section.includes(theme) || theme.includes(section));
+  if (direct) return direct;
   const text = String((score.section_name ?? "") + " " + (score.item_name ?? ""));
   const match = sectionAxisMap.find((group) => group.keywords.some((keyword) => text.includes(keyword)));
   return match?.theme ?? null;
