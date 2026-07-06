@@ -74,7 +74,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
   }
 
   async function changeStaffPassword(id: number, password: string, confirmation: string) {
-    if (password.length < 6) return "パスワードは6文字以上で入力してください。";
+    if (password.length < 4) return "パスワードは4文字以上入力してください。";
     if (password !== confirmation) return "新しいパスワードと確認用パスワードが一致しません。";
     const response = await fetch("/api/staff/" + id, {
       method: "PATCH",
@@ -305,11 +305,11 @@ function PasswordChangeForm({ staffId, onChangePassword }: { staffId: number; on
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <label className="space-y-2">
           <span className="font-bold">新しいパスワード</span>
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" minLength={6} autoComplete="new-password" />
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" minLength={4} autoComplete="new-password" />
         </label>
         <label className="space-y-2">
           <span className="font-bold">新しいパスワード確認</span>
-          <input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" minLength={6} autoComplete="new-password" />
+          <input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" minLength={4} autoComplete="new-password" />
         </label>
       </div>
       {error ? <p className="mt-3 rounded bg-red-50 px-4 py-3 font-bold text-red-700">{error}</p> : null}
