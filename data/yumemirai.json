@@ -92,7 +92,7 @@
       "staff_id": 1,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$sb0DJmOvuXeFcwASLLbzdQ$tjdU96Oj27AEcc_BoShCwmR3qzHjZwdh5Tg1TtmJr_Y"
+      "password_hash": "pbkdf2_sha256$120000$nWUeCFWIrfZupCNuyQxrTw$mlOoKUX_U-PRAVZForFeNTEduh2yMaDjSl47CXDpyK0"
     },
     {
       "id": 3,
@@ -102,7 +102,7 @@
       "staff_id": 2,
       "active": 0,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$x6qri1RAs5sWZQj6PGvgEQ$pfCo0iUmlXW5TdoHrieR37LxTgXgWKwG7NXrPbzNqdU"
+      "password_hash": "pbkdf2_sha256$120000$In_u98FqQGtSNw1_f0vcLA$nx5r2joFYmJqBPzZYXCk0XhTOX1MtRGJufvZoqgvbiE"
     },
     {
       "id": 4,
@@ -112,7 +112,7 @@
       "staff_id": 3,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$bkaCGn5bpiRijijCJj8UvA$_Jvxos_8PkBcbpmkoLk7PRKhm9v766YVOwbYgiXzGDU"
+      "password_hash": "pbkdf2_sha256$120000$SDH_zN4s1ZzzCa04ZZCSNQ$oHFeoYP1z-D-k2kJum7ExARAsANOOOoKAnbgYY4DCgU"
     },
     {
       "id": 5,
@@ -122,7 +122,7 @@
       "staff_id": 4,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$pUTLlGrmzTMd4-D18kDskw$XMqqjoP4S55tqaVhmXZ7lyHzKqPJCz9jFL52NLTNfvk"
+      "password_hash": "pbkdf2_sha256$120000$5uOtX4byKsmnkrm0CqKsyA$Vu8DXWupQYg0IcaulnRPuiSyOM_4TzlEayNaRLcy0vw"
     },
     {
       "id": 6,
@@ -132,7 +132,7 @@
       "staff_id": 5,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$UQ0pRdLtfqIpMPIuxN8Gjg$xHk3TVhS2SSrlRgco_M1PJiYzTqnHbT-lCbHgoyeLbM"
+      "password_hash": "pbkdf2_sha256$120000$Yxxv53AmXqPYaqdgxEJ9Qw$BAWPrAcaTsHVJlksWhnJ4m5dk3xTpDT2iky8YtIK-Rg"
     },
     {
       "id": 7,
@@ -142,7 +142,7 @@
       "staff_id": 6,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$mEkB6aemHTaxHtmMWZq5Kw$DOZAd2W73KHoupefhc52GZBgBsHq4cMP8F24eUgeh6E"
+      "password_hash": "pbkdf2_sha256$120000$fJjlroq9X8H6eB20HqCZ2w$vYh8mj6AeMUQwga9cbTXfaKNcfj7R8V7JK1gU_2oO_c"
     },
     {
       "id": 8,
@@ -152,7 +152,7 @@
       "staff_id": 7,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$rTZ_sl9FXGSJet-2H6whIQ$JmPk5yvgdNSkpAbT3-cBpj30me2l_8g9WXQcNs5Sqtg"
+      "password_hash": "pbkdf2_sha256$120000$_kgwXdKXpk8Sb7FkC4Iu2g$COrX56-mu2Aa-JM6dMMvnB1VXhEckv2eqLrNRJk18eA"
     },
     {
       "id": 9,
@@ -162,7 +162,7 @@
       "staff_id": 8,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$iIre8dkixkjO-lHGJFmszw$pSYPeyzC9x74EgdbBLiskSvs1F4brgWk2fs3WsQ2NHI"
+      "password_hash": "pbkdf2_sha256$120000$8ECGKPVW-9IVGx_KRprJVA$9k8lwSHj0FLauz-BQxNLph4VgQJT-27P1KqzTVMZ9BY"
     },
     {
       "id": 10,
@@ -172,7 +172,7 @@
       "staff_id": 9,
       "active": 1,
       "created_at": "2026-07-01T03:56:01.060Z",
-      "password_hash": "pbkdf2_sha256$120000$6lahJIWvrzuEU5FNN6vHUA$egirpxl_-LOL7QW2EkPQfN88N7sr4E7eXwecUG6iACU"
+      "password_hash": "pbkdf2_sha256$120000$CWzTrVYpzV0f77BVK3jIkw$S3Q1dbZmWR8fwLcnKKaMtY9pHwg7LpNHcHNtEq1Nv-M"
     }
   ],
   "evaluation_items": [
