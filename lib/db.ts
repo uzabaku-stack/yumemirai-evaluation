@@ -340,8 +340,9 @@ async function saveData(data: AppData) {
 }
 function monthFromDate(value: string | undefined) { return value && /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : new Date().toISOString().slice(0, 7); }
 function monthEndDate(month: string) { const [year, monthNumber] = month.split("-").map(Number); return new Date(year, monthNumber, 0).toISOString().slice(0, 10); }
-function defaultCycleName(month: string) { const [year, monthNumber] = month.split("-").map(Number); return `${year}年 ${monthNumber <= 6 ? "夏評価" : "冬評価"}`; }
+function defaultCycleName(month: string) { const [year, monthNumber] = month.split("-").map(Number); const season = monthNumber >= 4 && monthNumber <= 9 ? "夏評価" : "冬評価"; return String(year) + "年 " + season; }
 function normalizeCycleStatus(status: string | undefined): EvaluationCycleStatus { return status === "draft" || status === "active" || status === "closed" ? status : "draft"; }
+function isAutoCycleName(name: string | undefined) { return /^\d{4}年 (夏評価|冬評価)$/.test(String(name ?? "")); }
 function createCycleForMonth(data: AppData, month: string, status: EvaluationCycleStatus) {
   const timestamp = now();
   const cycle: EvaluationCycle = { id: data.nextIds.evaluation_cycle ?? 1, name: defaultCycleName(month), startDate: `${month}-01`, endDate: monthEndDate(month), status, created_at: timestamp, updated_at: timestamp, item_snapshot: [], rating_criteria_snapshot: [] };
@@ -350,7 +351,7 @@ function createCycleForMonth(data: AppData, month: string, status: EvaluationCyc
   return cycle;
 }
 function ensureEvaluationCycles(data: AppData) {
-  data.evaluation_cycles = (data.evaluation_cycles ?? []).map((cycle) => ({ ...cycle, status: normalizeCycleStatus(cycle.status), item_snapshot: Array.isArray(cycle.item_snapshot) ? cycle.item_snapshot : [], rating_criteria_snapshot: Array.isArray(cycle.rating_criteria_snapshot) ? cycle.rating_criteria_snapshot : [] }));
+  data.evaluation_cycles = (data.evaluation_cycles ?? []).map((cycle) => { const expectedName = defaultCycleName(monthFromDate(cycle.startDate)); return { ...cycle, name: isAutoCycleName(cycle.name) ? expectedName : cycle.name, status: normalizeCycleStatus(cycle.status), item_snapshot: Array.isArray(cycle.item_snapshot) ? cycle.item_snapshot : [], rating_criteria_snapshot: Array.isArray(cycle.rating_criteria_snapshot) ? cycle.rating_criteria_snapshot : [] }; });
   const currentMonth = monthFromDate(undefined);
   const cycleByMonth = new Map<string, EvaluationCycle>();
   for (const cycle of data.evaluation_cycles) cycleByMonth.set(monthFromDate(cycle.startDate), cycle);
@@ -510,7 +511,7 @@ function commentsForSelfEvaluation(evaluations: Evaluation[]) {
   return self?.comments ?? "{}";
 }
 
-function getActiveCycleInternal() { return [...store.evaluation_cycles].sort((a, b) => (a.status === "active" ? -1 : b.status === "active" ? 1 : b.startDate.localeCompare(a.startDate) || b.id - a.id))[0]; }
+function getActiveCycleInternal() { return store.evaluation_cycles.find((cycle) => cycle.status === "active") ?? [...store.evaluation_cycles].sort((a, b) => b.startDate.localeCompare(a.startDate) || b.id - a.id)[0]; }
 function cycleMonth(cycle: EvaluationCycle | undefined) { return monthFromDate(cycle?.startDate); }
 function evaluationsForStaffCycle(staffId: number, cycleId: number) { return store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && evaluation.staff_id === staffId && evaluation.evaluation_cycle_id === cycleId).map(withStaffName); }
 function itemAveragesForEvaluations(evaluations: Evaluation[]) { return buildGlobalItemAverages(evaluations).sort((a, b) => (a.average ?? 99) - (b.average ?? 99)); }
