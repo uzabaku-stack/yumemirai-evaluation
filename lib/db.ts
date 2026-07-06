@@ -41,9 +41,14 @@ function verifyPassword(password: string, stored: string | undefined) {
   return hashBuffer.length === expectedBuffer.length && timingSafeEqual(hashBuffer, expectedBuffer);
 }
 
-function safeUser(user: AppUser) {
-  const { password_hash: _passwordHash, pin: _pin, active: _active, created_at: _createdAt, ...safe } = user;
-  return safe;
+function safeUser(user: AppUser): CurrentUser {
+  return {
+    id: user.id,
+    login_id: user.login_id,
+    name: user.name,
+    role: user.role,
+    staff_id: user.staff_id,
+  };
 }
 export const defaultStaffRoles = ["歯科衛生士", "歯科助手", "歯科医師", "その他"];
 const staffSeeds = ["近藤", "岡崎", "亀井", "佐々木聡", "佐々木美", "富田", "藤原", "岩永", "浦崎"];
@@ -488,9 +493,6 @@ function themeForScore(score: Pick<EvaluationScore, "section_name" | "item_name"
   return match?.theme ?? null;
 }
 function averageNumbers(values: number[]) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null; }
-function evaluationsForStaffMonth(staffId: number, month: string) { return store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && evaluation.staff_id === staffId && evaluation.evaluation_month === month).map(withStaffName); }
-function available360MonthsForStaff(staffId: number) { return Array.from(new Set(store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && evaluation.staff_id === staffId).map((evaluation) => evaluation.evaluation_month))).sort((a, b) => b.localeCompare(a)); }
-function latest360MonthForStaff(staffId: number) { return available360MonthsForStaff(staffId)[0] ?? currentEvaluationMonth(); }
 function themeAveragesForEvaluations(evaluations: Evaluation[]) {
   const evaluationIds = new Set(evaluations.map((evaluation) => evaluation.id));
   const groups = new Map<EvaluationTheme, number[]>();

@@ -12,6 +12,7 @@ function evaluationTypeFor360(user: Awaited<ReturnType<typeof getCurrentUser>>, 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+
   try {
     const body = await request.json();
     const requestedStaffId = Number(body.staff_id);

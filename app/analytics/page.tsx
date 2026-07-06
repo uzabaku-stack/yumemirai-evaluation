@@ -14,7 +14,6 @@ type Search = { sort?: SortMode; cycleId?: string; type?: TypeFilter };
 
 type Summary = ReturnType<typeof get360SummaryForCycle>;
 type StaffSummary = Summary["staff_summaries"][number];
-type ThemeRow = StaffSummary["theme_breakdown"][number];
 type RankingRow = Summary["item_rankings"][number];
 
 function fmt(value: number | null | undefined) {
@@ -53,13 +52,6 @@ function staffAverage(row: StaffSummary, type: TypeFilter) {
   if (type === "peer") return row.peer_average;
   if (type === "director") return row.director_average;
   return average([row.self_average, row.peer_average, row.director_average]);
-}
-
-function themeAverage(row: ThemeRow, type: TypeFilter) {
-  if (type === "self") return row.self_average;
-  if (type === "peer") return row.peer_average;
-  if (type === "director") return row.director_average;
-  return row.overall_average;
 }
 
 function sortByMode<T>(rows: T[], getter: (row: T) => number | null | undefined, sortMode: SortMode) {

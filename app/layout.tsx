@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ClipboardCheck } from "lucide-react";
-import { getCurrentUser } from "@/lib/auth";
 import { LogoutButton } from "@/components/LogoutButton";
-import "./globals.css";
+import { getCurrentUser } from "@/lib/auth";
 import { isDirectorRole } from "@/lib/permissions";
+import "./globals.css";
 
-export const metadata: Metadata = { title: "ゆめみらい業務評価アプリ", description: "業務評価シート記入アプリ" };
+export const metadata: Metadata = {
+  title: "ゆめみらい業務評価アプリ",
+  description: "業務評価シート記入アプリ",
+};
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
