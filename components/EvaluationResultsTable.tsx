@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckSquare, Copy, Download, Edit3, Eraser, Eye, FileSpreadsheet, FileText, MoreVertical, Trash2 } from "lucide-react";
-import { EvaluationExportButtons, downloadEvaluationsXlsx } from "@/components/EvaluationExportButtons";
+import { EvaluationExportButtons, downloadEvaluationsCsv, downloadStaffEvaluationSheetXlsx, type StaffExportReport } from "@/components/EvaluationExportButtons";
 import type { Evaluation } from "@/lib/types";
 
 type Props = {
   evaluations: Evaluation[];
+  staffReports?: StaffExportReport[];
 };
 
 function currentMonth() {
@@ -27,37 +28,7 @@ function typeLabel(type: Evaluation["evaluation_type"]) {
   return "その他評価";
 }
 
-function escapeCsv(value: string | number | null | undefined) {
-  const text = value === null || value === undefined ? "" : String(value);
-  return '"' + text.replace(/"/g, '""') + '"';
-}
-
-function downloadEvaluationCsv(evaluation: Evaluation) {
-  const rows = [
-    ["項目", "内容"],
-    ["ID", evaluation.id],
-    ["氏名", evaluation.staff_name ?? ""],
-    ["評価期間", evaluation.evaluation_cycle_name ?? ""],
-    ["評価年月", evaluation.evaluation_month],
-    ["記載日", evaluation.entry_date],
-    ["評価種別", typeLabel(evaluation.evaluation_type)],
-    ["評価者", evaluation.evaluator_staff_name || evaluation.evaluator_name || ""],
-    ["合計点", evaluation.total_score],
-    ["満点", evaluation.max_score],
-    ["平均点", Number.isFinite(evaluation.average_score) ? evaluation.average_score.toFixed(2) : ""],
-    ["ランク", evaluation.rank],
-  ];
-  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
-  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "evaluation-" + evaluation.id + ".csv";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-export function EvaluationResultsTable({ evaluations }: Props) {
+export function EvaluationResultsTable({ evaluations, staffReports = [] }: Props) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [deleting, setDeleting] = useState(false);
@@ -65,6 +36,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
   const [message, setMessage] = useState("");
   const visibleIds = useMemo(() => evaluations.map((evaluation) => evaluation.id), [evaluations]);
   const selectedEvaluations = useMemo(() => evaluations.filter((evaluation) => selectedIds.includes(evaluation.id)), [evaluations, selectedIds]);
+  const reportByStaffId = useMemo(() => new Map(staffReports.map((report) => [report.staffId, report])), [staffReports]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
   const selectedCount = selectedIds.length;
 
@@ -166,7 +138,7 @@ export function EvaluationResultsTable({ evaluations }: Props) {
           <button type="button" onClick={() => setSelection([])} className="inline-flex min-h-12 items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink"><Eraser size={18} />選択解除</button>
           <button type="button" onClick={selectThisMonth} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">今月だけ選択</button>
           <button type="button" onClick={() => setSelection(visibleIds)} className="min-h-12 rounded border border-slate-200 bg-white px-4 py-3 font-bold text-ink">表示中のみ選択</button>
-          <EvaluationExportButtons evaluations={evaluations} fileBaseName="evaluation-results" />
+          <EvaluationExportButtons evaluations={evaluations} staffReports={staffReports} fileBaseName="evaluation-results" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded bg-white px-4 py-3 font-bold text-slate-700">選択中: {selectedCount}件</span>
@@ -207,32 +179,35 @@ export function EvaluationResultsTable({ evaluations }: Props) {
             </tr>
           </thead>
           <tbody>
-            {evaluations.length ? evaluations.map((evaluation) => (
-              <tr key={evaluation.id} className="border-b last:border-0">
-                <td className="py-3"><label className="flex min-h-12 items-center justify-center"><input type="checkbox" checked={selectedIds.includes(evaluation.id)} onChange={() => toggleOne(evaluation.id)} className="h-5 w-5 rounded border-slate-300" aria-label={(evaluation.staff_name ?? "評価") + "を選択"} /></label></td>
-                <td className="py-4 font-semibold">{evaluation.staff_name}</td>
-                <td>{evaluation.evaluation_cycle_name ?? "-"}</td>
-                <td>{evaluation.evaluation_month}</td>
-                <td>{evaluation.entry_date}</td>
-                <td><span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{typeLabel(evaluation.evaluation_type)}</span></td>
-                <td>{Number.isFinite(evaluation.average_score) ? evaluation.average_score.toFixed(2) : "-"}</td>
-                <td><span className="rounded bg-mint px-3 py-1 font-bold text-clinic">{evaluation.rank}</span></td>
-                <td className="py-3 text-right">
-                  <details className="relative inline-block text-left">
-                    <summary className="grid min-h-12 w-12 cursor-pointer list-none place-items-center rounded border border-slate-200 bg-white text-ink hover:bg-slate-50" aria-label="操作メニュー"><MoreVertical size={22} /></summary>
-                    <div className="absolute right-0 z-20 mt-2 w-56 rounded border border-slate-200 bg-white p-2 text-left shadow-lg">
-                      <Link href={"/evaluations/" + evaluation.id} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Eye size={18} />詳細を見る</Link>
-                      <Link href={"/evaluations/" + evaluation.id + "/edit"} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Edit3 size={18} />編集</Link>
-                      <button type="button" onClick={() => duplicateEvaluation(evaluation)} disabled={duplicatingId === evaluation.id} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50 disabled:opacity-50"><Copy size={18} />{duplicatingId === evaluation.id ? "複製中" : "複製"}</button>
-                      <button type="button" onClick={() => downloadEvaluationsXlsx([evaluation], "evaluation-" + evaluation.id)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><FileSpreadsheet size={18} />Excel出力</button>
-                      <button type="button" onClick={() => downloadEvaluationCsv(evaluation)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><Download size={18} />CSV出力</button>
-                      <Link href={"/evaluations/" + evaluation.id + "/print"} target="_blank" className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><FileText size={18} />PDF出力</Link>
-                      <button type="button" onClick={() => singleDelete(evaluation)} disabled={deleting} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={18} />評価を削除</button>
-                    </div>
-                  </details>
-                </td>
-              </tr>
-            )) : <tr><td colSpan={9} className="py-8 text-center text-slate-500">表示できる評価はありません。</td></tr>}
+            {evaluations.length ? evaluations.map((evaluation) => {
+              const report = reportByStaffId.get(evaluation.staff_id);
+              return (
+                <tr key={evaluation.id} className="border-b last:border-0">
+                  <td className="py-3"><label className="flex min-h-12 items-center justify-center"><input type="checkbox" checked={selectedIds.includes(evaluation.id)} onChange={() => toggleOne(evaluation.id)} className="h-5 w-5 rounded border-slate-300" aria-label={(evaluation.staff_name ?? "評価") + "を選択"} /></label></td>
+                  <td className="py-4 font-semibold">{evaluation.staff_name}</td>
+                  <td>{evaluation.evaluation_cycle_name ?? "-"}</td>
+                  <td>{evaluation.evaluation_month}</td>
+                  <td>{evaluation.entry_date}</td>
+                  <td><span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{typeLabel(evaluation.evaluation_type)}</span></td>
+                  <td>{Number.isFinite(evaluation.average_score) ? evaluation.average_score.toFixed(2) : "-"}</td>
+                  <td><span className="rounded bg-mint px-3 py-1 font-bold text-clinic">{evaluation.rank}</span></td>
+                  <td className="py-3 text-right">
+                    <details className="relative inline-block text-left">
+                      <summary className="grid min-h-12 w-12 cursor-pointer list-none place-items-center rounded border border-slate-200 bg-white text-ink hover:bg-slate-50" aria-label="操作メニュー"><MoreVertical size={22} /></summary>
+                      <div className="absolute right-0 z-20 mt-2 w-64 rounded border border-slate-200 bg-white p-2 text-left shadow-lg">
+                        <Link href={"/evaluations/" + evaluation.id} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Eye size={18} />詳細を見る</Link>
+                        <Link href={"/evaluations/" + evaluation.id + "/edit"} className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><Edit3 size={18} />編集</Link>
+                        <button type="button" onClick={() => duplicateEvaluation(evaluation)} disabled={duplicatingId === evaluation.id} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50 disabled:opacity-50"><Copy size={18} />{duplicatingId === evaluation.id ? "複製中" : "複製"}</button>
+                        <Link href={"/evaluations/" + evaluation.id + "/print"} target="_blank" className="flex min-h-11 items-center gap-2 rounded px-3 py-2 font-bold text-ink hover:bg-slate-50"><FileText size={18} />PDF出力（1人用）</Link>
+                        {report ? <button type="button" onClick={() => downloadStaffEvaluationSheetXlsx(report, "evaluation-sheet-" + report.staffName)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><FileSpreadsheet size={18} />Excel評価シート（1人用）</button> : null}
+                        <button type="button" onClick={() => downloadEvaluationsCsv([evaluation], "evaluation-" + evaluation.id)} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-ink hover:bg-slate-50"><Download size={18} />CSV出力</button>
+                        <button type="button" onClick={() => singleDelete(evaluation)} disabled={deleting} className="flex min-h-11 w-full items-center gap-2 rounded px-3 py-2 text-left font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={18} />評価を削除</button>
+                      </div>
+                    </details>
+                  </td>
+                </tr>
+              );
+            }) : <tr><td colSpan={9} className="py-8 text-center text-slate-500">表示できる評価はありません。</td></tr>}
           </tbody>
         </table>
       </div>

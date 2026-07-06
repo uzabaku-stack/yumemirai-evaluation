@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FileText } from "lucide-react";
-import { EvaluationExportButtons } from "@/components/EvaluationExportButtons";
+import { EvaluationExportButtons, StaffEvaluationSheetButton, type StaffExportReport } from "@/components/EvaluationExportButtons";
 import { ThemeRadarChart } from "@/components/ThemeRadarChart";
 import { getCurrentUser } from "@/lib/auth";
 import { getStaffEvaluationHistoryDetail } from "@/lib/db";
@@ -17,11 +17,51 @@ function visibleComments(raw: string) {
   return Object.entries(parseComments(raw)).filter(([, value]) => String(value ?? "").trim());
 }
 
+function commentText(raw: string) {
+  return visibleComments(raw).map(([key, value]) => key + ": " + String(value)).join("\n");
+}
+
 function typeLabel(type: Evaluation["evaluation_type"]) {
   if (type === "self") return "自己評価";
   if (type === "peer") return "360°評価";
   if (type === "director") return "院長評価";
   return "その他評価";
+}
+
+function average(values: Array<number | null | undefined>) {
+  const usable = values.filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
+  return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null;
+}
+
+function buildReport(detail: NonNullable<ReturnType<typeof getStaffEvaluationHistoryDetail>>): StaffExportReport {
+  const selfAverage = average(detail.evaluations.filter((evaluation) => evaluation.evaluation_type === "self").map((evaluation) => evaluation.average_score));
+  const peerAverage = average(detail.evaluations.filter((evaluation) => evaluation.evaluation_type === "peer").map((evaluation) => evaluation.average_score));
+  const directorAverage = average(detail.evaluations.filter((evaluation) => evaluation.evaluation_type === "director").map((evaluation) => evaluation.average_score));
+  const directorEvaluation = [...detail.evaluations].filter((evaluation) => evaluation.evaluation_type === "director").sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""))[0];
+  return {
+    staffId: detail.staff.id,
+    staffName: detail.staff.name,
+    evaluationPeriod: detail.cycle.name,
+    overallAverage: detail.overall_average,
+    rank: 1,
+    selfAverage,
+    peerAverage,
+    directorAverage,
+    finalEvaluation: detail.overall_average,
+    baseBonus: null,
+    finalBonus: null,
+    comments: detail.evaluations.map((evaluation) => commentText(evaluation.comments)).filter(Boolean).join("\n\n"),
+    directorComment: directorEvaluation ? commentText(directorEvaluation.comments) : "",
+    items: detail.item_averages.map((item) => ({
+      itemId: item.item_id,
+      sectionName: item.section_name,
+      itemName: item.item_name,
+      selfAverage: null,
+      peerAverage: null,
+      directorAverage: null,
+      finalAverage: item.average,
+    })),
+  };
 }
 
 export default async function EvaluationHistoryDetailPage({ params, searchParams }: { params: Promise<{ cycleId: string }>; searchParams?: Promise<{ staffId?: string }> }) {
@@ -36,6 +76,7 @@ export default async function EvaluationHistoryDetailPage({ params, searchParams
   if (!detail) redirect("/evaluation-history");
   const comments = visibleComments(detail.self_comments);
   const fileBaseName = "evaluation-history-" + detail.cycle.id + "-" + detail.staff.id;
+  const report = buildReport(detail);
 
   return (
     <div className="space-y-5">
@@ -46,6 +87,7 @@ export default async function EvaluationHistoryDetailPage({ params, searchParams
         </div>
         <div className="flex flex-wrap gap-2">
           {isDirector ? <EvaluationExportButtons evaluations={detail.evaluations} fileBaseName={fileBaseName} /> : null}
+          {isDirector ? <StaffEvaluationSheetButton report={report} fileBaseName={fileBaseName + "-sheet"} /> : null}
           <Link href={"/evaluation-history" + (isDirector ? "?staffId=" + staffId : "")} className="rounded border border-clinic px-5 py-4 font-bold text-clinic">履歴へ戻る</Link>
         </div>
       </div>
@@ -53,11 +95,11 @@ export default async function EvaluationHistoryDetailPage({ params, searchParams
       {isDirector ? (
         <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <h2 className="text-xl font-bold">過去帳票の再出力</h2>
-          <p className="mt-1 text-sm text-slate-600">この評価回に保存されている評価データから、PDF・Excel・CSVを再生成します。</p>
+          <p className="mt-1 text-sm text-slate-600">この評価回に保存されている評価データから、PDF・Excel評価シート・CSVを再生成します。</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {detail.evaluations.length ? detail.evaluations.map((evaluation) => (
               <Link key={evaluation.id} href={"/evaluations/" + evaluation.id + "/print"} target="_blank" className="inline-flex min-h-12 items-center gap-2 rounded border border-clinic bg-white px-4 py-3 font-bold text-clinic">
-                <FileText size={18} />{typeLabel(evaluation.evaluation_type)} PDF
+                <FileText size={18} />{typeLabel(evaluation.evaluation_type)} PDF出力（1人用）
               </Link>
             )) : <span className="rounded bg-slate-50 px-4 py-3 text-sm text-slate-500">再出力できる評価はまだありません。</span>}
           </div>

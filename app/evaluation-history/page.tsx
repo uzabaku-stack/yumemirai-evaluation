@@ -61,7 +61,7 @@ export default async function EvaluationHistoryPage({ searchParams }: { searchPa
                 <th>総合平均</th>
                 <th>テーマ別平均</th>
                 <th>コメント</th>
-                <th>詳細</th>
+                <th>帳票</th>
               </tr>
             </thead>
             <tbody>
@@ -77,7 +77,7 @@ export default async function EvaluationHistoryPage({ searchParams }: { searchPa
                   </td>
                   <td>{row.comment_exists ? "あり" : "なし"}</td>
                   <td>
-                    <Link href={"/evaluation-history/" + row.cycle.id + (isDirector ? "?staffId=" + staffId : "")} className="rounded bg-clinic px-4 py-3 font-bold text-white">詳細を見る</Link>
+                    <Link href={"/evaluation-history/" + row.cycle.id + (isDirector ? "?staffId=" + staffId : "")} className="rounded bg-clinic px-4 py-3 font-bold text-white">詳細・再出力</Link>
                   </td>
                 </tr>
               )) : <tr><td colSpan={6} className="py-8 text-center text-slate-500">評価履歴はまだありません。</td></tr>}
