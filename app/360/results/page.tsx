@@ -12,6 +12,7 @@ import { parseComments } from "@/lib/scoring";
 type Search = { cycleId?: string; staffId?: string };
 type Summary = ReturnType<typeof get360SummaryForCycle>;
 type StaffSummary = Summary["staff_summaries"][number];
+type ItemBreakdown = StaffSummary["item_breakdown"][number];
 
 function fmt(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "-" : value.toFixed(2);
@@ -50,6 +51,10 @@ function latestComment(row: StaffSummary) {
   return null;
 }
 
+function sortedItemBreakdown(items: ItemBreakdown[]) {
+  return [...items].sort((a, b) => a.section_name.localeCompare(b.section_name, "ja") || a.item_order - b.item_order || a.item_name.localeCompare(b.item_name, "ja"));
+}
+
 function buildStaffReports(rows: StaffSummary[], periodName: string): StaffExportReport[] {
   const ranked = rows
     .map((row) => ({ row, overall: staffAverage(row) }))
@@ -84,6 +89,77 @@ function buildStaffReports(rows: StaffSummary[], periodName: string): StaffExpor
       })),
     };
   });
+}
+
+function ItemAnalysisTable({ items }: { items: ItemBreakdown[] }) {
+  const rows = sortedItemBreakdown(items);
+  const ranked = rows.filter((item) => item.overall_average !== null && Number.isFinite(item.overall_average));
+  const strengths = [...ranked].sort((a, b) => (b.overall_average ?? 0) - (a.overall_average ?? 0)).slice(0, 3);
+  const improvements = [...ranked].sort((a, b) => (a.overall_average ?? 0) - (b.overall_average ?? 0)).slice(0, 3);
+
+  return (
+    <section className="mt-5 rounded border border-teal-900/10 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-lg font-bold">評価項目ごとの分析</h4>
+          <p className="mt-1 text-sm text-slate-600">自己評価・360°評価平均・院長評価・項目平均を評価項目ごとに表示します。</p>
+        </div>
+        <div className="text-sm font-bold text-clinic">項目数 {rows.length}件</div>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded bg-mint p-4">
+          <div className="font-bold text-clinic">強みTOP3</div>
+          <div className="mt-3 space-y-2">
+            {strengths.length ? strengths.map((item, index) => (
+              <div key={item.item_id} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2">
+                <span className="font-bold">{index + 1}. {item.item_name}</span>
+                <span className="text-lg font-bold text-clinic">{fmt(item.overall_average)}</span>
+              </div>
+            )) : <p className="text-sm text-slate-500">表示できる項目がありません。</p>}
+          </div>
+        </div>
+        <div className="rounded bg-slate-50 p-4">
+          <div className="font-bold text-ink">改善候補TOP3</div>
+          <div className="mt-3 space-y-2">
+            {improvements.length ? improvements.map((item, index) => (
+              <div key={item.item_id} className="flex items-center justify-between gap-3 rounded bg-white px-3 py-2">
+                <span className="font-bold">{index + 1}. {item.item_name}</span>
+                <span className="text-lg font-bold text-ink">{fmt(item.overall_average)}</span>
+              </div>
+            )) : <p className="text-sm text-slate-500">表示できる項目がありません。</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[920px] text-left">
+          <thead>
+            <tr className="border-b text-sm text-slate-500">
+              <th className="py-3">項目</th>
+              <th>セクション</th>
+              <th className="text-center">自己</th>
+              <th className="text-center">360平均</th>
+              <th className="text-center">院長</th>
+              <th className="text-center">項目平均</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.map((item) => (
+              <tr key={item.item_id} className="border-b last:border-0">
+                <td className="py-3 font-bold">{item.item_name}</td>
+                <td className="text-sm text-slate-600">{item.section_name}</td>
+                <td className="text-center font-bold">{fmt(item.self_average)}</td>
+                <td className="text-center font-bold">{fmt(item.peer_average)}</td>
+                <td className="text-center font-bold">{fmt(item.director_average)}</td>
+                <td className="text-center text-lg font-bold text-clinic">{fmt(item.overall_average)}</td>
+              </tr>
+            )) : <tr><td colSpan={6} className="py-8 text-center text-slate-500">項目別平均点はまだありません。</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 export default async function EvaluationResultsPage({ searchParams }: { searchParams?: Promise<Search> }) {
@@ -159,7 +235,7 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h3 className="text-2xl font-bold">{row.staff.name}</h3>
-                  <p className="mt-1 text-sm text-slate-600">評価詳細・院長コメント・履歴確認</p>
+                  <p className="mt-1 text-sm text-slate-600">総合評価に加えて、評価項目ごとの平均点を確認できます。</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href={hrefFor(params, { staffId: String(row.staff.id) })} className="rounded border border-clinic px-4 py-3 font-bold text-clinic">このスタッフだけ表示</Link>
@@ -172,6 +248,9 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
                 <div className="rounded bg-slate-50 p-4"><div className="text-sm font-bold text-slate-500">360°評価平均</div><div className="mt-1 text-2xl font-bold">{fmt(row.peer_average)}</div></div>
                 <div className="rounded bg-slate-50 p-4"><div className="text-sm font-bold text-slate-500">院長評価</div><div className="mt-1 text-2xl font-bold">{fmt(row.director_average)}</div></div>
               </div>
+
+              <ItemAnalysisTable items={row.item_breakdown} />
+
               {comment ? <section className="mt-4 rounded border border-slate-200 bg-slate-50 p-4"><h4 className="font-bold text-ink">最新コメント</h4><div className="mt-3 grid gap-3 md:grid-cols-2">{comment.comments.slice(0, 4).map(([key, value]) => <div key={key} className="rounded bg-white p-3"><div className="font-bold text-clinic">{key}</div><p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{String(value)}</p></div>)}</div></section> : <p className="mt-4 rounded bg-slate-50 p-4 text-sm text-slate-500">コメントはまだありません。</p>}
             </article>
           );
