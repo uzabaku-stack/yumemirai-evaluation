@@ -471,7 +471,31 @@ function syncStaffUser(staff: Staff) {
   if (existing) { existing.name = staff.name; existing.staff_id = staff.id; existing.active = staff.active; }
   else { store.users.push({ id: store.nextIds.user++, login_id: loginId, name: staff.name, role: "staff", staff_id: staff.id, password_hash: hashPassword(defaultStaffPassword), active: staff.active, created_at: now() }); }
 }
-function roleMatches(item: EvaluationItem, role: string) { const normalizedRole = normalizeStaffRole(role); return !item.target_roles?.length || item.target_roles.includes(normalizedRole); }
+function roleMatches(item: EvaluationItem, role: string) {
+  const targetRoles = normalizeTargetRoles(item.target_roles);
+  const normalizedRole = normalizeStaffRole(role);
+  return !targetRoles.length || targetRoles.includes("全職種") || targetRoles.includes("all") || targetRoles.includes(normalizedRole);
+}
+function itemForScore(score: Pick<EvaluationScore, "item_id" | "section_name" | "item_name" | "criteria" | "item_order">): EvaluationItem {
+  const master = store.evaluation_items.find((item) => item.id === score.item_id);
+  return {
+    id: score.item_id,
+    section_name: score.section_name || master?.section_name || "",
+    item_name: score.item_name || master?.item_name || "",
+    criteria: score.criteria || master?.criteria || "",
+    item_order: score.item_order ?? master?.item_order ?? 0,
+    active: master?.active ?? 1,
+    target_roles: normalizeTargetRoles(master?.target_roles),
+  };
+}
+function scoreMatchesEvaluationTarget(score: Pick<EvaluationScore, "item_id" | "section_name" | "item_name" | "criteria" | "item_order">, evaluation: Evaluation | undefined) {
+  if (!evaluation) return true;
+  const staff = store.staff.find((person) => person.id === evaluation.staff_id);
+  return !staff || roleMatches(itemForScore(score), staff.role);
+}
+function scoresForEvaluationTarget(evaluation: Evaluation | undefined) {
+  return store.evaluation_scores.filter((score) => score.evaluation_id === evaluation?.id && scoreMatchesEvaluationTarget(score, evaluation));
+}
 function snapshotItem(item: EvaluationItem): Pick<EvaluationScore, "section_name" | "item_name" | "criteria" | "item_order"> { return { section_name: item.section_name, item_name: item.item_name, criteria: item.criteria, item_order: item.item_order }; }
 
 const evaluationThemes = ["臨床スキル", "技工・機器関連スキル", "矯正関連スキル", "外科・診療補助スキル", "接遇・事務対応", "チーム・貢献姿勢"] as const;
@@ -495,10 +519,12 @@ function themeForScore(score: Pick<EvaluationScore, "section_name" | "item_name"
 function averageNumbers(values: number[]) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null; }
 function themeAveragesForEvaluations(evaluations: Evaluation[]) {
   const evaluationIds = new Set(evaluations.map((evaluation) => evaluation.id));
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const groups = new Map<EvaluationTheme, number[]>();
   for (const theme of evaluationThemes) groups.set(theme, []);
   for (const score of store.evaluation_scores) {
     if (!evaluationIds.has(score.evaluation_id) || score.not_applicable || score.score === null || !Number.isFinite(score.score)) continue;
+    if (!scoreMatchesEvaluationTarget(score, evaluationById.get(score.evaluation_id))) continue;
     const theme = themeForScore(score);
     if (!theme) continue;
     groups.get(theme)?.push(Number(score.score));
@@ -508,7 +534,8 @@ function themeAveragesForEvaluations(evaluations: Evaluation[]) {
 function themeAverageMap(evaluations: Evaluation[]) { return new Map(themeAveragesForEvaluations(evaluations).map((item) => [item.theme, item.average])); }
 function overallAverageForEvaluations(evaluations: Evaluation[]) {
   const ids = new Set(evaluations.map((evaluation) => evaluation.id));
-  const values = store.evaluation_scores.filter((score) => ids.has(score.evaluation_id) && !score.not_applicable && score.score !== null && Number.isFinite(score.score)).map((score) => Number(score.score));
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
+  const values = store.evaluation_scores.filter((score) => ids.has(score.evaluation_id) && scoreMatchesEvaluationTarget(score, evaluationById.get(score.evaluation_id)) && !score.not_applicable && score.score !== null && Number.isFinite(score.score)).map((score) => Number(score.score));
   return averageNumbers(values);
 }
 function commentsForSelfEvaluation(evaluations: Evaluation[]) {
@@ -624,11 +651,11 @@ export function getEvaluationItemsForStaff(staffId: number): EvaluationItem[] {
   return getEvaluationItems().filter((item) => !staff || roleMatches(item, staff.role));
 }
 export function getEvaluationItemsForEvaluation(evaluationId: number): EvaluationItem[] {
-  const scores = store.evaluation_scores.filter((score) => score.evaluation_id === evaluationId);
+  const evaluation = store.evaluations.find((item) => item.id === evaluationId);
+  const scores = scoresForEvaluationTarget(evaluation);
   if (scores.length && scores.every((score) => score.item_name && score.section_name)) {
     return scores.map((score) => ({ id: score.item_id, section_name: score.section_name ?? "", item_name: score.item_name ?? "", criteria: score.criteria ?? "評価基準は未設定です。", item_order: score.item_order ?? 0, active: 1, target_roles: [] })).sort((a, b) => a.item_order - b.item_order || a.id - b.id);
   }
-  const evaluation = store.evaluations.find((item) => item.id === evaluationId);
   return evaluation ? getEvaluationItemsForStaff(evaluation.staff_id) : getEvaluationItems();
 }
 export function getAllEvaluationItems(): EvaluationItem[] { return [...store.evaluation_items].sort((a, b) => a.item_order - b.item_order || a.id - b.id); }
@@ -649,10 +676,17 @@ export async function saveEvaluationItems(items: Array<Partial<EvaluationItem> &
   }
   await persist(); return getAllEvaluationItems();
 }
-export function getEvaluations(): Evaluation[] { return store.evaluations.map(withStaffName).sort((a, b) => b.entry_date.localeCompare(a.entry_date) || b.id - a.id); }
+function withTargetSummary(evaluation: Evaluation): Evaluation {
+  const summary = calculateSummary(getEvaluationItemsForStaff(evaluation.staff_id), getEvaluationScores(evaluation.id));
+  return { ...evaluation, total_score: summary.totalScore, max_score: summary.maxScore, average_score: summary.averageScore, rank: summary.rank };
+}
+export function getEvaluations(): Evaluation[] { return store.evaluations.map((evaluation) => withStaffName(withTargetSummary(evaluation))).sort((a, b) => b.entry_date.localeCompare(a.entry_date) || b.id - a.id); }
 export function getEvaluationsForStaffSelf(staffId: number): Evaluation[] { return getEvaluations().filter((evaluation) => evaluation.staff_id === staffId && evaluation.evaluation_type === "self"); }
-export function getEvaluation(id: number): Evaluation | undefined { const evaluation = store.evaluations.find((item) => item.id === id); return evaluation ? withStaffName(evaluation) : undefined; }
-export function getEvaluationScores(evaluationId: number): EvaluationScore[] { return store.evaluation_scores.filter((score) => score.evaluation_id === evaluationId).map(({ evaluation_id, item_id, score, comment, not_applicable, section_name, item_name, criteria, item_order }) => ({ evaluation_id, item_id, score, comment, not_applicable: not_applicable ? 1 : 0, section_name, item_name, criteria, item_order })); }
+export function getEvaluation(id: number): Evaluation | undefined { const evaluation = store.evaluations.find((item) => item.id === id); return evaluation ? withStaffName(withTargetSummary(evaluation)) : undefined; }
+export function getEvaluationScores(evaluationId: number): EvaluationScore[] {
+  const evaluation = store.evaluations.find((item) => item.id === evaluationId);
+  return scoresForEvaluationTarget(evaluation).map(({ evaluation_id, item_id, score, comment, not_applicable, section_name, item_name, criteria, item_order }) => ({ evaluation_id, item_id, score, comment, not_applicable: not_applicable ? 1 : 0, section_name, item_name, criteria, item_order }));
+}
 export async function deleteEvaluation(id: number) { const exists = store.evaluations.some((evaluation) => evaluation.id === id); if (!exists) return false; store.evaluations = store.evaluations.filter((evaluation) => evaluation.id !== id); store.evaluation_scores = store.evaluation_scores.filter((score) => score.evaluation_id !== id); await persist(); return true; }
 export async function createEvaluation(input: { staff_id: number; evaluator_name: string; evaluation_type: EvaluationType; evaluation_month?: string; entry_date: string; evaluator_user_id?: number | null; evaluator_staff_id?: number | null; is_360?: number; evaluation_cycle_id?: number | null }) {
   const cycle = input.evaluation_cycle_id ? store.evaluation_cycles.find((item) => item.id === input.evaluation_cycle_id) : getActiveCycleInternal();
@@ -664,12 +698,15 @@ export async function createEvaluation(input: { staff_id: number; evaluator_name
 }
 export async function updateEvaluation(id: number, payload: { scores: Array<{ item_id: number; score: number | null; comment?: string; not_applicable?: number | boolean }>; comments?: CommentValues }) {
   const evaluation = store.evaluations.find((item) => item.id === id); if (!evaluation) throw new Error("Evaluation not found");
-  for (const incoming of payload.scores) {
+  const allowedItems = getEvaluationItemsForStaff(evaluation.staff_id);
+  const allowedItemIds = new Set(allowedItems.map((item) => item.id));
+  store.evaluation_scores = store.evaluation_scores.filter((score) => score.evaluation_id !== id || allowedItemIds.has(score.item_id));
+  for (const incoming of payload.scores.filter((score) => allowedItemIds.has(score.item_id))) {
     const notApplicable = incoming.not_applicable ? 1 : 0;
     const nextScore = notApplicable ? null : incoming.score;
     const existing = store.evaluation_scores.find((score) => score.evaluation_id === id && score.item_id === incoming.item_id);
     if (existing) { existing.score = nextScore; existing.comment = incoming.comment ?? ""; existing.not_applicable = notApplicable; }
-    else { const item = store.evaluation_items.find((entry) => entry.id === incoming.item_id) ?? getEvaluationItemsForEvaluation(id).find((entry) => entry.id === incoming.item_id); store.evaluation_scores.push({ id: store.nextIds.score++, evaluation_id: id, item_id: incoming.item_id, score: nextScore, comment: incoming.comment ?? "", not_applicable: notApplicable, ...(item ? snapshotItem(item) : {}) }); }
+    else { const item = allowedItems.find((entry) => entry.id === incoming.item_id); store.evaluation_scores.push({ id: store.nextIds.score++, evaluation_id: id, item_id: incoming.item_id, score: nextScore, comment: incoming.comment ?? "", not_applicable: notApplicable, ...(item ? snapshotItem(item) : {}) }); }
   }
   const items = getEvaluationItemsForEvaluation(id); const savedScores = getEvaluationScores(id); const summary = calculateSummary(items, savedScores);
   evaluation.total_score = summary.totalScore; evaluation.max_score = summary.maxScore; evaluation.average_score = summary.averageScore; evaluation.rank = summary.rank; if (payload.comments) evaluation.comments = JSON.stringify(payload.comments); evaluation.updated_at = now(); await persist(); return summary;
@@ -697,7 +734,7 @@ export async function getOrCreate360Evaluation(user: CurrentUser, staffId: numbe
   return await createEvaluation({ staff_id: staffId, evaluator_name: user.name, evaluation_type: get360EvaluationType(user, staffId), evaluation_month: evaluationMonth, entry_date: entryDate, evaluator_user_id: user.id, evaluator_staff_id: user.staff_id, is_360: 1, evaluation_cycle_id: cycle?.id ?? null });
 }
 function is360EvaluationComplete(evaluation: Evaluation) {
-  const scores = store.evaluation_scores.filter((score) => score.evaluation_id === evaluation.id);
+  const scores = scoresForEvaluationTarget(evaluation);
   if (!scores.length) return false;
   return scores.every((score) => evaluation.evaluation_type === "self" ? score.score !== null && !score.not_applicable : score.score !== null || !!score.not_applicable);
 }
@@ -709,12 +746,13 @@ export function get360Progress(user: CurrentUser, month = currentEvaluationMonth
     return { staff, evaluation_id: evaluation?.id ?? null, evaluation_type: get360EvaluationType(user, staff.id), is_self_target: isSelfTarget, status };
   });
 }
-function averageFor(evaluations: Evaluation[]) { const values = evaluations.map((evaluation) => evaluation.average_score).filter((value) => Number.isFinite(value) && value > 0); return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null; }
+function averageFor(evaluations: Evaluation[]) { return overallAverageForEvaluations(evaluations); }
 function diff(a: number | null, b: number | null) { return a === null || b === null ? null : a - b; }
 function averageScoreForItem(evaluations: Evaluation[], itemId: number) {
   const evaluationIds = new Set(evaluations.map((evaluation) => evaluation.id));
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const values = store.evaluation_scores
-    .filter((score) => evaluationIds.has(score.evaluation_id) && score.item_id === itemId && !score.not_applicable && score.score !== null && Number.isFinite(score.score))
+    .filter((score) => evaluationIds.has(score.evaluation_id) && score.item_id === itemId && scoreMatchesEvaluationTarget(score, evaluationById.get(score.evaluation_id)) && !score.not_applicable && score.score !== null && Number.isFinite(score.score))
     .map((score) => Number(score.score));
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -729,9 +767,11 @@ function scoreItemMeta(score: JsonEvaluationScore) {
 }
 function buildGlobalItemAverages(evaluations: Evaluation[]) {
   const evaluationIds = new Set(evaluations.map((evaluation) => evaluation.id));
+  const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
   const groups = new Map<number, { item_id: number; item_name: string; section_name: string; item_order: number; total: number; count: number }>();
   for (const score of store.evaluation_scores) {
     if (!evaluationIds.has(score.evaluation_id) || score.not_applicable || score.score === null || !Number.isFinite(score.score)) continue;
+    if (!scoreMatchesEvaluationTarget(score, evaluationById.get(score.evaluation_id))) continue;
     const meta = scoreItemMeta(score);
     const current = groups.get(score.item_id) ?? { ...meta, total: 0, count: 0 };
     current.total += Number(score.score);
@@ -742,7 +782,7 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
 }
 export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
   const rawEvaluations = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && (cycleId ? evaluation.evaluation_cycle_id === cycleId : evaluation.evaluation_month === month)).map(withStaffName);
-  const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && Number.isFinite(Number(evaluation.average_score)) && Number(evaluation.average_score) > 0).map((evaluation) => evaluation.staff_id));
+  const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && (overallAverageForEvaluations([evaluation]) ?? 0) > 0).map((evaluation) => evaluation.staff_id));
   const all = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
   const globalItemAverages = buildGlobalItemAverages(all);
   const globalAverageByItem = new Map(globalItemAverages.map((item) => [item.item_id, item.average]));
@@ -757,7 +797,7 @@ export function get360Summary(month = currentEvaluationMonth(), cycleId?: number
     const peerEvaluatorCount = new Set(peerEvaluations.map((evaluation) => evaluation.evaluator_user_id ?? evaluation.evaluator_name).filter(Boolean)).size;
     const itemMap = new Map<number, { item_id: number; item_name: string; section_name: string; item_order: number }>();
     for (const evaluation of targetEvaluations) {
-      for (const score of store.evaluation_scores.filter((entry) => entry.evaluation_id === evaluation.id)) itemMap.set(score.item_id, scoreItemMeta(score));
+      for (const score of scoresForEvaluationTarget(evaluation)) itemMap.set(score.item_id, scoreItemMeta(score));
     }
     const item_breakdown = Array.from(itemMap.values()).map((item) => {
       const self_average = averageScoreForItem(selfEvaluations, item.item_id);

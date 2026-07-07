@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Evaluation360Matrix } from "@/components/Evaluation360Matrix";
 import { RatingCriteriaAccordion } from "@/components/RatingCriteriaAccordion";
 import { getCurrentUser } from "@/lib/auth";
-import { getActiveEvaluationCycle, getEvaluation, getEvaluationItems, getEvaluationScores, getOrCreate360Evaluation, getStaffList, refreshStoreFromRemote } from "@/lib/db";
+import { getActiveEvaluationCycle, getEvaluation, getEvaluationItemsForStaff, getEvaluationScores, getOrCreate360Evaluation, getStaffList, refreshStoreFromRemote } from "@/lib/db";
 import { parseComments } from "@/lib/scoring";
 import { isDirectorRole } from "@/lib/permissions";
 
@@ -35,7 +35,7 @@ export default async function Evaluation360Page({ searchParams }: { searchParams
   const query = searchParams ? await searchParams : {};
   await refreshStoreFromRemote();
   const staff = getStaffList();
-  const items = getEvaluationItems();
+  const items = Array.from(new Map(staff.flatMap((person) => getEvaluationItemsForStaff(person.id)).map((item) => [item.id, item])).values()).sort((a, b) => a.item_order - b.item_order || a.id - b.id);
   const activeCycle = getActiveEvaluationCycle();
   const month = query.month || activeCycle?.startDate.slice(0, 7) || new Date().toISOString().slice(0, 7);
   if (!staff.length) return <div className="rounded border border-teal-900/10 bg-white p-6 shadow-soft">評価対象スタッフが登録されていません。</div>;
