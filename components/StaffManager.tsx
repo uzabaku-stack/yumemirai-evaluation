@@ -6,6 +6,7 @@ import type { Staff, StaffRole } from "@/lib/types";
 
 export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Staff[]; initialRoles: StaffRole[] }) {
   const [staff, setStaff] = useState(initialStaff);
+  const [savedStaff, setSavedStaff] = useState(initialStaff);
   const [roles, setRoles] = useState(initialRoles);
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
@@ -15,10 +16,25 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
   const [passwordStaffId, setPasswordStaffId] = useState<number | null>(null);
 
   const activeRoleNames = useMemo(() => roles.filter((item) => item.active).sort((a, b) => a.role_order - b.role_order || a.id - b.id).map((item) => item.name), [roles]);
-  const filteredStaff = useMemo(() => filterRole === "all" ? staff : staff.filter((person) => person.role === filterRole), [filterRole, staff]);
+  const filteredStaff = useMemo(() => {
+    if (filterRole === "all") return staff;
+    return staff.filter((person) => {
+      const saved = savedStaff.find((item) => item.id === person.id);
+      return person.role === filterRole || saved?.role === filterRole;
+    });
+  }, [filterRole, savedStaff, staff]);
 
   function roleChoices(currentRole: string) {
     return Array.from(new Set([...activeRoleNames, currentRole].filter(Boolean)));
+  }
+
+  function updateDraftPerson(id: number, patch: Partial<Staff>) {
+    setStaff((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+
+  function hasUnsavedStaffChanges(person: Staff) {
+    const saved = savedStaff.find((item) => item.id === person.id);
+    return !!saved && (person.name !== saved.name || person.role !== saved.role);
   }
 
   async function refreshRoles() {
@@ -38,6 +54,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
     }
     const data = await response.json();
     setStaff((current) => [...current, data.staff].sort((a, b) => a.id - b.id));
+    setSavedStaff((current) => [...current, data.staff].sort((a, b) => a.id - b.id));
     setName("");
     setMessage("スタッフを追加しました。パスワードはハッシュ化され、画面には表示されません。");
     await refreshRoles();
@@ -57,6 +74,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
     }
     const data = await response.json();
     setStaff((items) => items.map((item) => item.id === id ? data.staff : item));
+    setSavedStaff((items) => items.map((item) => item.id === id ? data.staff : item));
     setMessage(success);
     await refreshRoles();
   }
@@ -105,6 +123,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
       return;
     }
     setStaff((items) => items.filter((item) => item.id !== id));
+    setSavedStaff((items) => items.filter((item) => item.id !== id));
     setMessage("スタッフを削除しました。");
   }
 
@@ -137,6 +156,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
     const data = await response.json();
     setRoles((items) => items.map((item) => item.id === id ? data.role : item));
     if (patch.name && current.name !== patch.name) setStaff((items) => items.map((person) => person.role === current.name ? { ...person, role: patch.name ?? person.role } : person));
+    if (patch.name && current.name !== patch.name) setSavedStaff((items) => items.map((person) => person.role === current.name ? { ...person, role: patch.name ?? person.role } : person));
     setMessage("職種を保存しました。");
   }
 
@@ -248,11 +268,11 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <label className="space-y-2">
                   <span className="font-bold">スタッフ名</span>
-                  <input value={person.name} onChange={(event) => setStaff((items) => items.map((item) => item.id === person.id ? { ...item, name: event.target.value } : item))} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" />
+                  <input value={person.name} onChange={(event) => updateDraftPerson(person.id, { name: event.target.value })} className="h-14 w-full rounded border border-slate-300 px-4 text-lg" />
                 </label>
                 <label className="space-y-2">
                   <span className="font-bold">職種</span>
-                  <select value={person.role} onChange={(event) => setStaff((items) => items.map((item) => item.id === person.id ? { ...item, role: event.target.value } : item))} className="h-14 w-full rounded border border-slate-300 px-4 text-lg">
+                  <select value={person.role} onChange={(event) => updateDraftPerson(person.id, { role: event.target.value })} className="h-14 w-full rounded border border-slate-300 px-4 text-lg">
                     {roleChoices(person.role).map((item) => <option key={item} value={item}>{item}</option>)}
                   </select>
                 </label>
@@ -263,7 +283,7 @@ export function StaffManager({ initialStaff, initialRoles }: { initialStaff: Sta
                   <div><dt className="text-slate-500">最新評価日</dt><dd className="mt-1 font-semibold">{person.latest_date ?? "未評価"}</dd></div>
                   <div><dt className="text-slate-500">最新スコア</dt><dd className="mt-1 font-semibold">{person.latest_score ? person.latest_score.toFixed(2) : "-"}</dd></div>
                 </dl>
-                <button onClick={() => updatePerson(person.id, { name: person.name, role: person.role }, "スタッフ情報を保存しました。")} className="flex min-h-12 items-center gap-2 rounded bg-clinic px-5 py-3 font-bold text-white"><Save size={18} />保存</button>
+                <button onClick={() => updatePerson(person.id, { name: person.name, role: person.role }, "スタッフ情報を保存しました。")} disabled={!hasUnsavedStaffChanges(person)} className="flex min-h-12 items-center gap-2 rounded bg-clinic px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"><Save size={18} />保存</button>
               </div>
             </section>
           ))}
