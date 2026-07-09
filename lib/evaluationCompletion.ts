@@ -20,8 +20,8 @@ export type EvaluationCompletionStats = {
 
 export function isEvaluationInCycle(evaluation: Evaluation, cycle: EvaluationCycle | null | undefined) {
   if (!cycle) return true;
-  if (evaluation.evaluation_cycle_id) return evaluation.evaluation_cycle_id === cycle.id;
   const cycleMonth = cycle.startDate.slice(0, 7);
+  if (evaluation.evaluation_cycle_id === cycle.id) return true;
   return evaluation.evaluation_month === cycleMonth;
 }
 

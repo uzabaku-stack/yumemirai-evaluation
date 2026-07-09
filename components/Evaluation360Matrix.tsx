@@ -30,7 +30,9 @@ function cellKey(evaluationId: number, itemId: number) {
 }
 
 function appliesToStaff(item: EvaluationItem, staff: Staff) {
-  return !item.target_roles?.length || item.target_roles.includes(staff.role);
+  const targetRoles = (item.target_roles ?? []).map((role) => role.trim()).filter(Boolean);
+  const staffRole = staff.role.trim();
+  return !targetRoles.length || targetRoles.includes("全職種") || targetRoles.includes("all") || targetRoles.includes(staffRole);
 }
 
 function initialValues(targets: Target[]) {

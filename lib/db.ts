@@ -309,6 +309,9 @@ const itemSeeds = [
 function now() { return new Date().toISOString(); }
 function normalizeStaffRole(role: string) { return role.trim(); }
 function normalizeTargetRoles(roles: string[] | undefined) { return Array.from(new Set((roles ?? []).map(normalizeStaffRole).filter(Boolean))); }
+function numberFromUnknown(value: unknown): number | null { const numberValue = Number(value); return Number.isFinite(numberValue) ? numberValue : null; }
+function stringFromUnknown(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
+function booleanNumberFromUnknown(value: unknown): number { return value === true || value === 1 || value === "1" ? 1 : 0; }
 function staffRoleInUse(name: string) { const normalized = normalizeStaffRole(name); return store.staff.some((staff) => normalizeStaffRole(staff.role) === normalized) || store.evaluation_items.some((item) => normalizeTargetRoles(item.target_roles).includes(normalized)); }
 function enrichStaffRole(role: StaffRole): StaffRole { const normalized = normalizeStaffRole(role.name); return { ...role, has_staff: store.staff.some((staff) => normalizeStaffRole(staff.role) === normalized), has_items: store.evaluation_items.some((item) => normalizeTargetRoles(item.target_roles).includes(normalized)) }; }
 function normalizeRatingCriteria(criteria: RatingCriterion[] | undefined): RatingCriterion[] {
@@ -386,12 +389,25 @@ function normalizeIds(data: AppData) {
     return { ...user, password_hash: user.password_hash || hashPassword(fallbackPassword), pin: undefined };
   });
   data.evaluations = data.evaluations.map((evaluation) => {
-    const evaluatorUser = evaluation.evaluator_user_id ? data.users.find((user) => user.id === evaluation.evaluator_user_id) : null;
-    const evaluatorStaffUser = evaluation.evaluator_staff_id ? data.users.find((user) => user.staff_id === evaluation.evaluator_staff_id && user.role === "staff") : null;
-    return { ...evaluation, evaluator_user_id: evaluation.evaluator_user_id ?? evaluatorStaffUser?.id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? evaluatorUser?.staff_id ?? null, is_360: evaluation.is_360 ? 1 : 0, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null };
+    const raw = evaluation as Evaluation & Record<string, unknown>;
+    const staffId = numberFromUnknown(raw.staff_id ?? raw.staffId ?? raw.targetStaffId ?? raw.target_staff_id) ?? evaluation.staff_id;
+    const cycleId = numberFromUnknown(raw.evaluation_cycle_id ?? raw.evaluationCycleId ?? raw.evaluationPeriodId ?? raw.evaluation_period_id);
+    const evaluatorUserId = numberFromUnknown(raw.evaluator_user_id ?? raw.evaluatorUserId);
+    const evaluatorStaffId = numberFromUnknown(raw.evaluator_staff_id ?? raw.evaluatorStaffId);
+    const evaluatorUser = evaluatorUserId ? data.users.find((user) => user.id === evaluatorUserId) : null;
+    const evaluatorStaffUser = evaluatorStaffId ? data.users.find((user) => user.staff_id === evaluatorStaffId && user.role === "staff") : null;
+    const evaluationType = stringFromUnknown(raw.evaluation_type ?? raw.evaluationType) ?? evaluation.evaluation_type;
+    return { ...evaluation, staff_id: staffId, evaluation_type: evaluationType as EvaluationType, evaluator_user_id: evaluatorUserId ?? evaluatorStaffUser?.id ?? null, evaluator_staff_id: evaluatorStaffId ?? evaluatorUser?.staff_id ?? null, is_360: booleanNumberFromUnknown(raw.is_360 ?? raw.is360 ?? raw.is360Evaluation), evaluation_cycle_id: cycleId };
   });
-  data.evaluation_scores = data.evaluation_scores.map((score) => ({ ...score, not_applicable: score.not_applicable ? 1 : 0 }));
-  data.evaluation_items = data.evaluation_items.map((item) => ({ ...item, target_roles: normalizeTargetRoles(Array.isArray(item.target_roles) ? item.target_roles : []) }));
+  data.evaluation_scores = data.evaluation_scores.map((score) => {
+    const raw = score as JsonEvaluationScore & Record<string, unknown>;
+    return { ...score, evaluation_id: numberFromUnknown(raw.evaluation_id ?? raw.evaluationId) ?? score.evaluation_id, item_id: numberFromUnknown(raw.item_id ?? raw.itemId) ?? score.item_id, not_applicable: booleanNumberFromUnknown(raw.not_applicable ?? raw.notApplicable) };
+  });
+  data.evaluation_items = data.evaluation_items.map((item) => {
+    const raw = item as EvaluationItem & Record<string, unknown>;
+    const targetRoles = raw.target_roles ?? raw.targetRoles;
+    return { ...item, section_name: stringFromUnknown(raw.section_name ?? raw.sectionName) ?? item.section_name, item_name: stringFromUnknown(raw.item_name ?? raw.itemName) ?? item.item_name, item_order: numberFromUnknown(raw.item_order ?? raw.itemOrder ?? raw.order) ?? item.item_order, target_roles: normalizeTargetRoles(Array.isArray(targetRoles) ? targetRoles.map(String) : []) };
+  });
   ensureEvaluationCycles(data);
   data.nextIds.staff = Math.max(data.nextIds.staff, ...data.staff.map((item) => item.id + 1), 1);
   data.nextIds.item = Math.max(data.nextIds.item, ...data.evaluation_items.map((item) => item.id + 1), 1);
@@ -748,6 +764,11 @@ export function get360Progress(user: CurrentUser, month = currentEvaluationMonth
 }
 function averageFor(evaluations: Evaluation[]) { return overallAverageForEvaluations(evaluations); }
 function diff(a: number | null, b: number | null) { return a === null || b === null ? null : a - b; }
+function isEvaluationResultType(evaluation: Evaluation) { return evaluation.is_360 === 1 || evaluation.evaluation_type === "self" || evaluation.evaluation_type === "peer" || evaluation.evaluation_type === "director"; }
+function evaluationMatchesCycleOrMonth(evaluation: Evaluation, month: string, cycleId?: number) {
+  if (cycleId && evaluation.evaluation_cycle_id === cycleId) return true;
+  return evaluation.evaluation_month === month;
+}
 function averageScoreForItem(evaluations: Evaluation[], itemId: number) {
   const evaluationIds = new Set(evaluations.map((evaluation) => evaluation.id));
   const evaluationById = new Map(evaluations.map((evaluation) => [evaluation.id, evaluation]));
@@ -781,7 +802,7 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
   return Array.from(groups.values()).map((item) => ({ item_id: item.item_id, item_name: item.item_name, section_name: item.section_name, item_order: item.item_order, average: item.count ? item.total / item.count : null, count: item.count }));
 }
 export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
-  const rawEvaluations = store.evaluations.filter((evaluation) => evaluation.is_360 === 1 && (cycleId ? evaluation.evaluation_cycle_id === cycleId : evaluation.evaluation_month === month)).map(withStaffName);
+  const rawEvaluations = store.evaluations.filter((evaluation) => isEvaluationResultType(evaluation) && evaluationMatchesCycleOrMonth(evaluation, month, cycleId)).map(withStaffName);
   const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && (overallAverageForEvaluations([evaluation]) ?? 0) > 0).map((evaluation) => evaluation.staff_id));
   const all = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
   const globalItemAverages = buildGlobalItemAverages(all);
