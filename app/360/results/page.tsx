@@ -39,6 +39,10 @@ function staffAverage(row: StaffSummary) {
   return average([row.self_average, row.peer_average, row.director_average]);
 }
 
+function hasDisplayableEvaluation(row: StaffSummary) {
+  return row.evaluations.length > 0 || row.self_average !== null || row.peer_average !== null || row.director_average !== null || row.item_breakdown.length > 0;
+}
+
 function hrefFor(params: Search, patch: Partial<Search>) {
   const next = new URLSearchParams();
   const merged = { ...params, ...patch };
@@ -188,8 +192,8 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const completion = getEvaluationCompletionStats(getStaffList(), getEvaluations(), selectedCycle ?? null);
   const listedEvaluations = completion.completedStaffEvaluations.sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""));
   const selectedStaffId = query.staffId ? Number(query.staffId) : null;
-  const completedStaffRows = summary.staff_summaries.filter((row) => completion.completedStaffIds.has(row.staff.id));
-  const staffRows = selectedStaffId ? completedStaffRows.filter((row) => row.staff.id === selectedStaffId) : completedStaffRows;
+  const displayableStaffRows = summary.staff_summaries.filter(hasDisplayableEvaluation);
+  const staffRows = selectedStaffId ? displayableStaffRows.filter((row) => row.staff.id === selectedStaffId) : displayableStaffRows;
   const params: Search = { cycleId: selectedCycle ? String(selectedCycle.id) : undefined, staffId: selectedStaffId ? String(selectedStaffId) : undefined };
   const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-");
 
@@ -223,7 +227,7 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
             <div className="mb-2 text-sm font-bold text-slate-600">スタッフ</div>
             <div className="flex flex-wrap gap-2">
               <Link href={hrefFor(params, { staffId: undefined })} className={(selectedStaffId ? "border border-clinic text-clinic" : "bg-clinic text-white") + " rounded px-4 py-3 font-bold"}>全員</Link>
-              {completedStaffRows.map((row) => (
+              {displayableStaffRows.map((row) => (
                 <Link key={row.staff.id} href={hrefFor(params, { staffId: String(row.staff.id) })} className={(selectedStaffId === row.staff.id ? "bg-clinic text-white" : "border border-clinic text-clinic") + " rounded px-4 py-3 font-bold"}>
                   {row.staff.name}
                 </Link>
@@ -270,6 +274,7 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
         <h2 className="text-2xl font-bold">スタッフごとの評価結果</h2>
         {staffRows.length ? staffRows.map((row) => {
           const comment = latestComment(row);
+          const selfSubmitted = completion.completedStaffIds.has(row.staff.id);
           return (
             <article key={row.staff.id} className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -288,6 +293,12 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
                 <div className="rounded bg-slate-50 p-4"><div className="text-sm font-bold text-slate-500">360°評価平均</div><div className="mt-1 text-2xl font-bold">{fmt(row.peer_average)}</div></div>
                 <div className="rounded bg-slate-50 p-4"><div className="text-sm font-bold text-slate-500">院長評価</div><div className="mt-1 text-2xl font-bold">{fmt(row.director_average)}</div></div>
               </div>
+
+              {!selfSubmitted ? (
+                <p className="mt-4 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                  自己評価は未提出ですが、保存済みの360°評価・院長評価をもとに分析を表示しています。
+                </p>
+              ) : null}
 
               <ItemAnalysisTable items={row.item_breakdown} />
 

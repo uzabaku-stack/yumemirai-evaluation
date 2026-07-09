@@ -804,11 +804,11 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
 export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
   const rawEvaluations = store.evaluations.filter((evaluation) => isEvaluationResultType(evaluation) && evaluationMatchesCycleOrMonth(evaluation, month, cycleId)).map(withStaffName);
   const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && (overallAverageForEvaluations([evaluation]) ?? 0) > 0).map((evaluation) => evaluation.staff_id));
-  const all = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
-  const globalItemAverages = buildGlobalItemAverages(all);
+  const completedEvaluations = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
+  const globalItemAverages = buildGlobalItemAverages(completedEvaluations);
   const globalAverageByItem = new Map(globalItemAverages.map((item) => [item.item_id, item.average]));
   const rows = getAllStaffList().map((staff) => {
-    const targetEvaluations = all.filter((evaluation) => evaluation.staff_id === staff.id);
+    const targetEvaluations = rawEvaluations.filter((evaluation) => evaluation.staff_id === staff.id);
     const selfEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "self");
     const directorEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "director");
     const peerEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "peer");
@@ -844,7 +844,7 @@ export function get360Summary(month = currentEvaluationMonth(), cycleId?: number
     }));
     return { staff, self_average: selfAverage, director_average: directorAverage, peer_average: peerAverage, peer_evaluator_count: peerEvaluatorCount, excluded_average: peerAverage, self_peer_diff: diff(selfAverage, peerAverage), self_director_diff: diff(selfAverage, directorAverage), evaluations: targetEvaluations, item_breakdown, theme_breakdown: themeRows };
   });
-  const globalThemeAverages = themeAveragesForEvaluations(all);
+  const globalThemeAverages = themeAveragesForEvaluations(completedEvaluations);
   return { staff_summaries: rows, item_rankings: globalItemAverages, theme_rankings: globalThemeAverages };
 }
 
