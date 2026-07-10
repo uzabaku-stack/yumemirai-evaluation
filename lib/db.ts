@@ -312,6 +312,14 @@ function normalizeTargetRoles(roles: string[] | undefined) { return Array.from(n
 function numberFromUnknown(value: unknown): number | null { const numberValue = Number(value); return Number.isFinite(numberValue) ? numberValue : null; }
 function stringFromUnknown(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
 function booleanNumberFromUnknown(value: unknown): number { return value === true || value === 1 || value === "1" ? 1 : 0; }
+function normalizeEvaluationTypeValue(value: unknown, fallback: EvaluationType): EvaluationType {
+  const text = String(value ?? "").trim();
+  if (text === "self" || text === "self_evaluation" || text === "自己評価" || text === "本人評価") return "self";
+  if (text === "peer" || text === "other_staff" || text === "360" || text === "360°評価" || text === "他人評価") return "peer";
+  if (text === "director" || text === "院長評価") return "director";
+  if (text === "other" || text === "他者評価") return "other";
+  return fallback;
+}
 function staffRoleInUse(name: string) { const normalized = normalizeStaffRole(name); return store.staff.some((staff) => normalizeStaffRole(staff.role) === normalized) || store.evaluation_items.some((item) => normalizeTargetRoles(item.target_roles).includes(normalized)); }
 function enrichStaffRole(role: StaffRole): StaffRole { const normalized = normalizeStaffRole(role.name); return { ...role, has_staff: store.staff.some((staff) => normalizeStaffRole(staff.role) === normalized), has_items: store.evaluation_items.some((item) => normalizeTargetRoles(item.target_roles).includes(normalized)) }; }
 function normalizeRatingCriteria(criteria: RatingCriterion[] | undefined): RatingCriterion[] {
@@ -396,8 +404,8 @@ function normalizeIds(data: AppData) {
     const evaluatorStaffId = numberFromUnknown(raw.evaluator_staff_id ?? raw.evaluatorStaffId);
     const evaluatorUser = evaluatorUserId ? data.users.find((user) => user.id === evaluatorUserId) : null;
     const evaluatorStaffUser = evaluatorStaffId ? data.users.find((user) => user.staff_id === evaluatorStaffId && user.role === "staff") : null;
-    const evaluationType = stringFromUnknown(raw.evaluation_type ?? raw.evaluationType) ?? evaluation.evaluation_type;
-    return { ...evaluation, staff_id: staffId, evaluation_type: evaluationType as EvaluationType, evaluator_user_id: evaluatorUserId ?? evaluatorStaffUser?.id ?? null, evaluator_staff_id: evaluatorStaffId ?? evaluatorUser?.staff_id ?? null, is_360: booleanNumberFromUnknown(raw.is_360 ?? raw.is360 ?? raw.is360Evaluation), evaluation_cycle_id: cycleId };
+    const evaluationType = normalizeEvaluationTypeValue(raw.evaluation_type ?? raw.evaluationType, evaluation.evaluation_type);
+    return { ...evaluation, staff_id: staffId, evaluation_type: evaluationType, evaluator_user_id: evaluatorUserId ?? evaluatorStaffUser?.id ?? null, evaluator_staff_id: evaluatorStaffId ?? evaluatorUser?.staff_id ?? null, is_360: booleanNumberFromUnknown(raw.is_360 ?? raw.is360 ?? raw.is360Evaluation), evaluation_cycle_id: cycleId };
   });
   data.evaluation_scores = data.evaluation_scores.map((score) => {
     const raw = score as JsonEvaluationScore & Record<string, unknown>;
@@ -764,7 +772,13 @@ export function get360Progress(user: CurrentUser, month = currentEvaluationMonth
 }
 function averageFor(evaluations: Evaluation[]) { return overallAverageForEvaluations(evaluations); }
 function diff(a: number | null, b: number | null) { return a === null || b === null ? null : a - b; }
-function isEvaluationResultType(evaluation: Evaluation) { return evaluation.is_360 === 1 || evaluation.evaluation_type === "self" || evaluation.evaluation_type === "peer" || evaluation.evaluation_type === "director"; }
+function isEvaluationResultType(evaluation: Evaluation) { return evaluation.is_360 === 1 || evaluation.evaluator_staff_id === evaluation.staff_id || evaluation.evaluation_type === "self" || evaluation.evaluation_type === "peer" || evaluation.evaluation_type === "director"; }
+function effectiveEvaluationType(evaluation: Evaluation): EvaluationType {
+  if (evaluation.evaluation_type === "self" || evaluation.evaluator_staff_id === evaluation.staff_id) return "self";
+  if (evaluation.evaluation_type === "director") return "director";
+  if (evaluation.evaluation_type === "peer") return "peer";
+  return evaluation.evaluation_type;
+}
 function evaluationMatchesCycleOrMonth(evaluation: Evaluation, month: string, cycleId?: number) {
   if (cycleId && evaluation.evaluation_cycle_id === cycleId) return true;
   return evaluation.evaluation_month === month;
@@ -803,15 +817,15 @@ function buildGlobalItemAverages(evaluations: Evaluation[]) {
 }
 export function get360Summary(month = currentEvaluationMonth(), cycleId?: number) {
   const rawEvaluations = store.evaluations.filter((evaluation) => isEvaluationResultType(evaluation) && evaluationMatchesCycleOrMonth(evaluation, month, cycleId)).map(withStaffName);
-  const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => evaluation.evaluation_type === "self" && (overallAverageForEvaluations([evaluation]) ?? 0) > 0).map((evaluation) => evaluation.staff_id));
+  const completedStaffIds = new Set(rawEvaluations.filter((evaluation) => effectiveEvaluationType(evaluation) === "self" && (overallAverageForEvaluations([evaluation]) ?? 0) > 0).map((evaluation) => evaluation.staff_id));
   const completedEvaluations = rawEvaluations.filter((evaluation) => completedStaffIds.has(evaluation.staff_id));
   const globalItemAverages = buildGlobalItemAverages(completedEvaluations);
   const globalAverageByItem = new Map(globalItemAverages.map((item) => [item.item_id, item.average]));
   const rows = getAllStaffList().map((staff) => {
     const targetEvaluations = rawEvaluations.filter((evaluation) => evaluation.staff_id === staff.id);
-    const selfEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "self");
-    const directorEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "director");
-    const peerEvaluations = targetEvaluations.filter((evaluation) => evaluation.evaluation_type === "peer");
+    const selfEvaluations = targetEvaluations.filter((evaluation) => effectiveEvaluationType(evaluation) === "self");
+    const directorEvaluations = targetEvaluations.filter((evaluation) => effectiveEvaluationType(evaluation) === "director");
+    const peerEvaluations = targetEvaluations.filter((evaluation) => effectiveEvaluationType(evaluation) === "peer");
     const selfAverage = averageFor(selfEvaluations);
     const directorAverage = averageFor(directorEvaluations);
     const peerAverage = averageFor(peerEvaluations);

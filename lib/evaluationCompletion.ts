@@ -30,6 +30,10 @@ function hasSubmittedScore(evaluation: Evaluation) {
   return Number.isFinite(score) && score > 0;
 }
 
+function isSelfEvaluation(evaluation: Evaluation) {
+  return evaluation.evaluation_type === "self" || evaluation.evaluator_staff_id === evaluation.staff_id;
+}
+
 function average(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -37,7 +41,7 @@ function average(values: number[]) {
 export function getSelfSubmittedStaffIds(evaluations: Evaluation[]) {
   return new Set(
     evaluations
-      .filter((evaluation) => evaluation.evaluation_type === "self" && hasSubmittedScore(evaluation))
+      .filter((evaluation) => isSelfEvaluation(evaluation) && hasSubmittedScore(evaluation))
       .map((evaluation) => evaluation.staff_id),
   );
 }
