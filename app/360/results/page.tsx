@@ -9,6 +9,7 @@ import { get360SummaryForCycle, getEvaluationCycles, getEvaluations, getStaffLis
 import { getEvaluationCompletionStats } from "@/lib/evaluationCompletion";
 import { isDirectorRole } from "@/lib/permissions";
 import { parseComments } from "@/lib/scoring";
+import type { EvaluationCycle, Staff } from "@/lib/types";
 
 type Search = { cycleId?: string; staffId?: string };
 type Summary = ReturnType<typeof get360SummaryForCycle>;
@@ -42,6 +43,29 @@ function staffAverage(row: StaffSummary) {
 
 function hasDisplayableEvaluation(row: StaffSummary) {
   return row.evaluations.length > 0 || row.self_average !== null || row.peer_average !== null || row.director_average !== null || row.item_breakdown.length > 0;
+}
+
+function numberArrayFromUnknown(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+}
+
+function cycleTargetStaffIds(cycle: EvaluationCycle | null | undefined) {
+  if (!cycle) return [];
+  const raw = cycle as EvaluationCycle & Record<string, unknown>;
+  return numberArrayFromUnknown(
+    raw.targetStaffIds ??
+      raw.target_staff_ids ??
+      raw.evaluationTargetStaffIds ??
+      raw.evaluation_target_staff_ids ??
+      raw.staffIds ??
+      raw.staff_ids,
+  );
+}
+
+function evaluationTargetStaffIds(staff: Staff[], cycle: EvaluationCycle | null | undefined) {
+  const cycleTargets = cycleTargetStaffIds(cycle);
+  return new Set(cycleTargets.length ? cycleTargets : staff.map((person) => person.id));
 }
 
 function hrefFor(params: Search, patch: Partial<Search>) {
@@ -197,11 +221,17 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const query = searchParams ? await searchParams : {};
   const cycles = getEvaluationCycles();
   const selectedCycle = cycles.find((cycle) => cycle.id === Number(query.cycleId)) ?? cycles.find((cycle) => cycle.status === "active") ?? cycles[0];
+  const targetStaff = getStaffList();
+  const targetStaffIds = evaluationTargetStaffIds(targetStaff, selectedCycle);
+  const isTargetStaff = (staffId: number) => targetStaffIds.has(staffId);
   const summary = selectedCycle ? get360SummaryForCycle(selectedCycle.id) : get360SummaryForCycle(cycles[0]?.id ?? 0);
-  const completion = getEvaluationCompletionStats(getStaffList(), getEvaluations(), selectedCycle ?? null);
-  const listedEvaluations = completion.completedStaffEvaluations.sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""));
-  const selectedStaffId = query.staffId ? Number(query.staffId) : null;
-  const displayableStaffRows = summary.staff_summaries.filter(hasDisplayableEvaluation);
+  const completion = getEvaluationCompletionStats(targetStaff, getEvaluations(), selectedCycle ?? null);
+  const listedEvaluations = completion.completedStaffEvaluations
+    .filter((evaluation) => isTargetStaff(evaluation.staff_id))
+    .sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""));
+  const requestedStaffId = query.staffId ? Number(query.staffId) : null;
+  const selectedStaffId = requestedStaffId && isTargetStaff(requestedStaffId) ? requestedStaffId : null;
+  const displayableStaffRows = summary.staff_summaries.filter((row) => isTargetStaff(row.staff.id) && hasDisplayableEvaluation(row));
   const staffRows = selectedStaffId ? displayableStaffRows.filter((row) => row.staff.id === selectedStaffId) : displayableStaffRows;
   const params: Search = { cycleId: selectedCycle ? String(selectedCycle.id) : undefined, staffId: selectedStaffId ? String(selectedStaffId) : undefined };
   const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-");
