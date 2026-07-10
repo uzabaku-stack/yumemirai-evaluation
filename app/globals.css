@@ -26,4 +26,10 @@ button, input, select, textarea { font: inherit; }
   .print-compact { font-size: 11px !important; line-height: 1.45 !important; }
   .print-note-box { min-height: 28mm; border: 1px solid #94a3b8; background: white; }
   .print-sign-line { height: 14mm; border-bottom: 1px solid #334155; }
+  body.printing-staff-analysis main > div > :not(.staff-analysis-list) { display: none !important; }
+  body.printing-staff-analysis .staff-analysis-list > h2 { display: none !important; }
+  body.printing-staff-analysis .staff-analysis-card { display: none !important; }
+  body.printing-staff-analysis .staff-analysis-card.print-target { display: block !important; border: 0 !important; padding: 0 !important; background: white !important; }
+  body.printing-staff-analysis .staff-analysis-card.print-target .overflow-x-auto { overflow: visible !important; }
+  body.printing-staff-analysis .staff-analysis-card.print-target table { min-width: 0 !important; width: 100% !important; }
 }

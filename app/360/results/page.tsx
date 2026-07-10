@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { FileText, History, MessageSquareText, UserCheck } from "lucide-react";
 import { EvaluationResultsTable } from "@/components/EvaluationResultsTable";
 import type { StaffExportReport } from "@/components/EvaluationExportButtons";
+import { StaffAnalysisPrintButton } from "@/components/StaffAnalysisPrintButton";
 import { getCurrentUser } from "@/lib/auth";
 import { get360SummaryForCycle, getEvaluationCycles, getEvaluations, getStaffList } from "@/lib/db";
 import { getEvaluationCompletionStats } from "@/lib/evaluationCompletion";
@@ -59,6 +60,14 @@ function latestComment(row: StaffSummary) {
     if (comments.length) return { evaluation, comments };
   }
   return null;
+}
+
+function latestDirectorComment(row: StaffSummary) {
+  for (const evaluation of [...row.evaluations].filter((item) => item.evaluation_type === "director").sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""))) {
+    const comments = visibleComments(evaluation.comments);
+    if (comments.length) return comments;
+  }
+  return [];
 }
 
 function sortedItemBreakdown(items: ItemBreakdown[]) {
@@ -270,21 +279,25 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
         <EvaluationResultsTable evaluations={selectedStaffId ? listedEvaluations.filter((evaluation) => evaluation.staff_id === selectedStaffId) : listedEvaluations} staffReports={staffReports} />
       </section>
 
-      <section className="space-y-5">
+      <section className="staff-analysis-list space-y-5">
         <h2 className="text-2xl font-bold">スタッフごとの評価結果</h2>
         {staffRows.length ? staffRows.map((row) => {
           const comment = latestComment(row);
+          const directorComments = latestDirectorComment(row);
+          const printTargetId = "staff-analysis-" + row.staff.id;
           const selfSubmitted = completion.completedStaffIds.has(row.staff.id);
           return (
-            <article key={row.staff.id} className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
+            <article id={printTargetId} key={row.staff.id} className="staff-analysis-card print-section rounded border border-teal-900/10 bg-white p-5 shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <h3 className="text-2xl font-bold">{row.staff.name}</h3>
+                  <div className="print-only mt-2 text-sm text-slate-600">評価期間: <b>{selectedCycle?.name ?? "-"}</b> / 印刷日: <b>{new Date().toLocaleDateString("ja-JP")}</b></div>
                   <p className="mt-1 text-sm text-slate-600">総合評価に加えて、評価項目ごとの平均点と医院平均との差を確認できます。</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link href={hrefFor(params, { staffId: String(row.staff.id) })} className="rounded border border-clinic px-4 py-3 font-bold text-clinic">このスタッフだけ表示</Link>
                   <Link href={"/evaluation-history?staffId=" + row.staff.id} className="rounded border border-clinic px-4 py-3 font-bold text-clinic">評価履歴</Link>
+                  <StaffAnalysisPrintButton targetId={printTargetId} />
                 </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-4">
@@ -301,6 +314,20 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
               ) : null}
 
               <ItemAnalysisTable items={row.item_breakdown} />
+
+              {directorComments.length ? (
+                <section className="mt-4 rounded border border-slate-200 bg-white p-4">
+                  <h4 className="font-bold text-ink">院長コメント</h4>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {directorComments.map(([key, value]) => (
+                      <div key={key} className="rounded bg-slate-50 p-3">
+                        <div className="font-bold text-clinic">{key}</div>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{String(value)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
 
               {comment ? (
                 <section className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
