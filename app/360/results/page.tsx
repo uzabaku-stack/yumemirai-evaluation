@@ -7,6 +7,7 @@ import { StaffAnalysisPrintButton } from "@/components/StaffAnalysisPrintButton"
 import { getCurrentUser } from "@/lib/auth";
 import { get360SummaryForCycle, getEvaluationCycles, getEvaluations, getStaffList } from "@/lib/db";
 import { getEvaluationCompletionStats } from "@/lib/evaluationCompletion";
+import { calculateEvaluationStandardization } from "@/lib/evaluationStandardization";
 import { isDirectorRole } from "@/lib/permissions";
 import { parseComments } from "@/lib/scoring";
 import type { EvaluationCycle, Staff } from "@/lib/types";
@@ -98,7 +99,7 @@ function sortedItemBreakdown(items: ItemBreakdown[]) {
   return [...items].sort((a, b) => a.section_name.localeCompare(b.section_name, "ja") || a.item_order - b.item_order || a.item_name.localeCompare(b.item_name, "ja"));
 }
 
-function buildStaffReports(rows: StaffSummary[], periodName: string): StaffExportReport[] {
+function buildStaffReports(rows: StaffSummary[], periodName: string, standardizedByStaff = new Map<number, { standardizedScore: number | null; bonusScore: number | null }>()): StaffExportReport[] {
   const ranked = rows.map((row) => ({ row, overall: staffAverage(row) })).sort((a, b) => (b.overall ?? -1) - (a.overall ?? -1));
   const rankByStaffId = new Map(ranked.map((entry, index) => [entry.row.staff.id, index + 1]));
 
@@ -117,6 +118,8 @@ function buildStaffReports(rows: StaffSummary[], periodName: string): StaffExpor
       peerAverage: row.peer_average,
       directorAverage: row.director_average,
       finalEvaluation: staffAverage(row),
+      standardizedScore: standardizedByStaff.get(row.staff.id)?.standardizedScore ?? staffAverage(row),
+      bonusScore: standardizedByStaff.get(row.staff.id)?.bonusScore ?? standardizedByStaff.get(row.staff.id)?.standardizedScore ?? staffAverage(row),
       baseBonus: null,
       finalBonus: null,
       comments,
@@ -225,7 +228,8 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const targetStaffIds = evaluationTargetStaffIds(targetStaff, selectedCycle);
   const isTargetStaff = (staffId: number) => targetStaffIds.has(staffId);
   const summary = selectedCycle ? get360SummaryForCycle(selectedCycle.id) : get360SummaryForCycle(cycles[0]?.id ?? 0);
-  const completion = getEvaluationCompletionStats(targetStaff, getEvaluations(), selectedCycle ?? null);
+  const evaluations = getEvaluations();
+  const completion = getEvaluationCompletionStats(targetStaff, evaluations, selectedCycle ?? null);
   const listedEvaluations = completion.completedStaffEvaluations
     .filter((evaluation) => isTargetStaff(evaluation.staff_id))
     .sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || ""));
@@ -234,7 +238,10 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const displayableStaffRows = summary.staff_summaries.filter((row) => isTargetStaff(row.staff.id) && hasDisplayableEvaluation(row));
   const staffRows = selectedStaffId ? displayableStaffRows.filter((row) => row.staff.id === selectedStaffId) : displayableStaffRows;
   const params: Search = { cycleId: selectedCycle ? String(selectedCycle.id) : undefined, staffId: selectedStaffId ? String(selectedStaffId) : undefined };
-  const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-");
+  const standardizationEvaluations = evaluations.filter((evaluation) => isTargetStaff(evaluation.staff_id) && (!selectedCycle?.id || evaluation.evaluation_cycle_id === selectedCycle.id));
+  const standardized = calculateEvaluationStandardization(standardizationEvaluations);
+  const standardizedByStaff = new Map(standardized.staffScores.map((score) => [score.staffId, { standardizedScore: score.standardizedScore, bonusScore: score.bonusScore }]));
+  const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-", standardizedByStaff);
 
   return (
     <div className="space-y-6">

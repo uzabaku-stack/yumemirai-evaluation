@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, FileSpreadsheet } from "lucide-react";
+import { calculateEvaluationStandardizationMultiplier } from "@/lib/bonusAdjustment";
 import type { Evaluation, EvaluationType } from "@/lib/types";
 
 export type StaffExportItem = {
@@ -23,6 +24,8 @@ export type StaffExportReport = {
   peerAverage: number | null;
   directorAverage: number | null;
   finalEvaluation: number | null;
+  standardizedScore?: number | null;
+  bonusScore?: number | null;
   baseBonus?: number | null;
   finalBonus?: number | null;
   comments: string;
@@ -72,15 +75,6 @@ function numberValue(value: string | number | null | undefined) {
 
 function multiplier(percent: string | number | null | undefined) {
   return numberValue(percent) / 100;
-}
-
-function evaluationCoefficient(average: number | null | undefined) {
-  if (average === null || average === undefined) return 0.8;
-  if (average >= 4.5) return 1.2;
-  if (average >= 4.0) return 1.1;
-  if (average >= 3.5) return 1.0;
-  if (average >= 3.0) return 0.9;
-  return 0.8;
 }
 
 function distributeEvenly(total: number, count: number) {
@@ -141,7 +135,7 @@ function reportsWithBonus(reports: StaffExportReport[]) {
     const input = settings.rows?.[String(report.staffId)] ?? {};
     const baseBonusMode = input.baseBonusMode === "manual" || input.baseBonusMode === "auto" ? input.baseBonusMode : (input.baseBonus ? "manual" : "auto");
     const baseBonus = mode === "pool" && baseBonusMode !== "manual" ? (autoBaseBonuses[index] ?? 0) : numberValue(input.baseBonus);
-    const coefficient = evaluationCoefficient(report.finalEvaluation);
+    const coefficient = calculateEvaluationStandardizationMultiplier(report.bonusScore ?? report.standardizedScore ?? report.finalEvaluation);
     const overallMultiplier = multiplier(input.employmentAdjustmentRate ?? "100") * multiplier(input.workHoursAdjustmentRate ?? "100") * multiplier(input.attendanceAdjustmentRate ?? "100");
     const individualAdjustment = numberValue(input.individualAdjustmentAmount);
     const referenceFinal = baseBonus * coefficient * overallMultiplier + individualAdjustment;

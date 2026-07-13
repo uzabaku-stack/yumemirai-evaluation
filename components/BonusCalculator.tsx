@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Download, RotateCcw, Save } from "lucide-react";
-import { calculateBonusAdjustment, ratePercentToMultiplier } from "@/lib/bonusAdjustment";
+import { calculateBonusAdjustment, calculateEvaluationStandardizationMultiplier, evaluationStandardizationAdjustmentDescription, ratePercentToMultiplier } from "@/lib/bonusAdjustment";
 
 type BonusStaff = {
   id: number;
@@ -50,20 +50,11 @@ function numberValue(value: string) {
 }
 
 function percent(value: number) {
-  return Math.round(value * 100) + "%";
+  return (value * 100).toFixed(1).replace(/\.0$/, "") + "%";
 }
 
 function fmt(value: number | null) {
   return value === null || !Number.isFinite(value) ? "-" : value.toFixed(2);
-}
-
-function evaluationCoefficient(average: number | null) {
-  if (average === null) return 0.8;
-  if (average >= 4.5) return 1.2;
-  if (average >= 4.0) return 1.1;
-  if (average >= 3.5) return 1.0;
-  if (average >= 3.0) return 0.9;
-  return 0.8;
 }
 
 function escapeCsv(value: string | number | null) {
@@ -202,7 +193,7 @@ export function BonusCalculator({ staff }: Props) {
     const autoBaseBonuses = mode === "pool" ? distributeEvenly(totalPoolValue, staff.length) : staff.map(() => 0);
     const baseRows = staff.map((person, index) => {
       const input = normalizeRowInput(rows[String(person.id)]);
-      const coefficient = evaluationCoefficient(person.bonusScore);
+      const coefficient = calculateEvaluationStandardizationMultiplier(person.bonusScore);
       const employmentMultiplier = ratePercentToMultiplier(numberValue(input.employmentAdjustmentRate));
       const workHoursMultiplier = ratePercentToMultiplier(numberValue(input.workHoursAdjustmentRate));
       const attendanceMultiplier = ratePercentToMultiplier(numberValue(input.attendanceAdjustmentRate));
@@ -250,7 +241,7 @@ export function BonusCalculator({ staff }: Props) {
   }
 
   function exportCsv() {
-    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "均等配分基準賞与", "基準賞与額", "評価標準化補正", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "総合補正後", "最終賞与", "メモ"];
+    const header = ["計算モード", "スタッフ名", "職種", "基本給", "スタッフ評価平均", "評価標準化", "賞与反映評価", "基準賞与の扱い", "均等配分基準賞与", "基準賞与額", "評価標準化補正", "補正後の重み", "雇用形態補正", "勤務時間補正", "出勤日数補正", "総合補正", "個別調整", "評価反映後", "総合補正後", "最終賞与", "メモ"];
     const body = calculated.map((row) => [
       mode === "base" ? "基準賞与から計算" : "総賞与額から自動配分",
       row.person.name,
@@ -263,6 +254,7 @@ export function BonusCalculator({ staff }: Props) {
       Math.round(row.suggestedBaseBonus),
       Math.round(row.baseBonus),
       percent(row.adjustment.evaluationMultiplier),
+      Math.round(row.poolWeight),
       percent(row.adjustment.employmentMultiplier),
       percent(row.adjustment.workHoursMultiplier),
       percent(row.adjustment.attendanceMultiplier),
@@ -273,7 +265,7 @@ export function BonusCalculator({ staff }: Props) {
       Math.round(row.finalBonus),
       row.input.memo,
     ]);
-    const csv = [header, ...body, ["合計", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", Math.round(totalBonus), ""]].map((line) => line.map(escapeCsv).join(",")).join("\n");
+    const csv = [header, ...body, ["合計", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", Math.round(totalBonus), ""]].map((line) => line.map(escapeCsv).join(",")).join("\n");
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -321,7 +313,7 @@ export function BonusCalculator({ staff }: Props) {
         <div className="mt-5 space-y-3">
           {calculated.map((row) => (
             <article key={row.person.id} className="rounded border border-slate-200 bg-white p-4">
-              <div className="grid gap-3 lg:grid-cols-[1.4fr_repeat(4,minmax(120px,1fr))] lg:items-center">
+              <div className="grid gap-3 lg:grid-cols-[1.4fr_repeat(5,minmax(120px,1fr))] lg:items-center">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="truncate text-xl font-bold text-ink">{row.person.name}</h3>
@@ -329,8 +321,9 @@ export function BonusCalculator({ staff }: Props) {
                     {mode === "pool" ? <span className={(row.usesAutoBaseBonus ? "bg-mint text-clinic" : "bg-amber-50 text-amber-700") + " rounded px-3 py-1 text-xs font-bold"}>{row.usesAutoBaseBonus ? "自動配分" : "個別上書き"}</span> : null}
                   </div>
                 </div>
-                <SummaryValue label="評価平均" value={fmt(row.person.averageScore)} />
-                <SummaryValue label="評価標準化" value={fmt(row.person.standardizedScore)} />
+                <SummaryValue label="標準化前評価" value={fmt(row.person.averageScore)} />
+                <SummaryValue label="標準化後評価" value={fmt(row.person.standardizedScore)} />
+                <SummaryValue label="評価標準化補正率" value={percent(row.adjustment.evaluationMultiplier)} />
                 <SummaryValue label="総合補正後" value={yen(row.adjustment.finalBonus)} />
                 <div className="rounded bg-mint px-4 py-3 text-right">
                   <div className="text-xs font-bold text-clinic">最終賞与</div>
@@ -368,7 +361,8 @@ export function BonusCalculator({ staff }: Props) {
                     <input inputMode="numeric" value={row.input.individualAdjustmentAmount} onChange={(event) => update(row.person.id, { individualAdjustmentAmount: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 -10000" />
                   </label>
                   <div className="rounded bg-white p-3 text-sm leading-7">
-                    <div>評価標準化補正: <b>{percent(row.adjustment.evaluationMultiplier)}</b></div>
+                    <div>評価標準化補正率: <b>{percent(row.adjustment.evaluationMultiplier)}</b></div>
+                    <div>補正後の重み: <b>{yen(row.poolWeight)}</b></div>
                     <div>雇用形態補正: <b>{percent(row.adjustment.employmentMultiplier)}</b></div>
                     <div>勤務時間補正: <b>{percent(row.adjustment.workHoursMultiplier)}</b></div>
                     <div>出勤日数補正: <b>{percent(row.adjustment.attendanceMultiplier)}</b></div>
@@ -398,8 +392,9 @@ export function BonusCalculator({ staff }: Props) {
 
       <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
         <h2 className="text-xl font-bold">評価標準化補正</h2>
+        <p className="mt-2 text-sm leading-7 text-slate-600">{evaluationStandardizationAdjustmentDescription}</p>
         <div className="mt-4 grid gap-3 md:grid-cols-5">
-          {["4.5以上: 120%", "4.0以上: 110%", "3.5以上: 100%", "3.0以上: 90%", "3.0未満: 80%"].map((item) => <div key={item} className="rounded bg-slate-50 p-4 text-center font-bold text-ink">{item}</div>)}
+          {["3.0 → 80%", "3.5 → 100%", "3.8 → 112%", "4.0 → 120%", "4.5 → 140%"].map((item) => <div key={item} className="rounded bg-slate-50 p-4 text-center font-bold text-ink">{item}</div>)}
         </div>
       </section>
     </div>
