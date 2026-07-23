@@ -20,6 +20,8 @@ type RowInput = {
   baseSalary: string;
   baseBonus: string;
   baseBonusMode: BaseBonusMode;
+  finalBonus: string;
+  finalBonusMode: BaseBonusMode;
   employmentAdjustmentRate: string;
   workHoursAdjustmentRate: string;
   attendanceAdjustmentRate: string;
@@ -67,6 +69,8 @@ function defaultRowInput(): RowInput {
     baseSalary: "",
     baseBonus: "",
     baseBonusMode: "auto",
+    finalBonus: "",
+    finalBonusMode: "auto",
     employmentAdjustmentRate: "100",
     workHoursAdjustmentRate: "100",
     attendanceAdjustmentRate: "100",
@@ -86,10 +90,14 @@ function normalizeRowInput(input?: LegacyRowInput): RowInput {
   const legacyAttendanceRate = legacyMinusRateToPercent(input);
   const baseBonus = input?.baseBonus ?? fallback.baseBonus;
   const baseBonusMode = input?.baseBonusMode === "manual" || input?.baseBonusMode === "auto" ? input.baseBonusMode : (baseBonus ? "manual" : "auto");
+  const finalBonus = input?.finalBonus ?? fallback.finalBonus;
+  const finalBonusMode = input?.finalBonusMode === "manual" || input?.finalBonusMode === "auto" ? input.finalBonusMode : (finalBonus ? "manual" : "auto");
   return {
     baseSalary: input?.baseSalary ?? fallback.baseSalary,
     baseBonus,
     baseBonusMode,
+    finalBonus,
+    finalBonusMode,
     employmentAdjustmentRate: input?.employmentAdjustmentRate ?? fallback.employmentAdjustmentRate,
     workHoursAdjustmentRate: input?.workHoursAdjustmentRate ?? fallback.workHoursAdjustmentRate,
     attendanceAdjustmentRate: input?.attendanceAdjustmentRate ?? legacyAttendanceRate ?? fallback.attendanceAdjustmentRate,
@@ -154,6 +162,25 @@ function distributePoolByWeight(total: number, weights: number[], fixedAdjustmen
   return rounded;
 }
 
+function distributePoolByWeightWithLockedFinals(total: number, weights: number[], fixedAdjustments: number[], lockedFinals: Array<number | null>) {
+  if (!weights.length) return [] as number[];
+  const results = lockedFinals.map((value) => value === null ? 0 : Math.max(0, Math.round(value)));
+  const unlockedIndexes = weights.map((_, index) => index).filter((index) => lockedFinals[index] === null);
+  if (!unlockedIndexes.length) {
+    return results;
+  }
+  const lockedTotal = results.reduce((sum, value, index) => sum + (lockedFinals[index] === null ? 0 : value), 0);
+  const unlockedBonuses = distributePoolByWeight(
+    Math.max(0, Math.round(total) - lockedTotal),
+    unlockedIndexes.map((index) => weights[index]),
+    unlockedIndexes.map((index) => fixedAdjustments[index]),
+  );
+  unlockedIndexes.forEach((index, cursor) => {
+    results[index] = unlockedBonuses[cursor] ?? 0;
+  });
+  return results;
+}
+
 function RateSelect({ id, value, onChange, label }: { id: string; value: string; onChange: (value: string) => void; label: string }) {
   return (
     <label className="space-y-1">
@@ -201,6 +228,7 @@ export function BonusCalculator({ staff }: Props) {
       const suggestedBaseBonus = autoBaseBonuses[index] ?? 0;
       const usesAutoBaseBonus = mode === "pool" && input.baseBonusMode !== "manual";
       const baseBonus = usesAutoBaseBonus ? suggestedBaseBonus : numberValue(input.baseBonus);
+      const finalBonusOverride = input.finalBonusMode === "manual" && input.finalBonus !== "" ? Math.max(0, numberValue(input.finalBonus)) : null;
       const adjustment = calculateBonusAdjustment({
         baseBonus,
         evaluationMultiplier: coefficient,
@@ -210,12 +238,17 @@ export function BonusCalculator({ staff }: Props) {
         individualAdjustmentAmount,
       });
       const poolWeight = Math.max(0, baseBonus) * coefficient * adjustment.overallMultiplier;
-      return { person, input, baseBonus, suggestedBaseBonus, usesAutoBaseBonus, coefficient, adjustment, poolWeight, finalBonus: adjustment.finalBonus };
+      return { person, input, baseBonus, suggestedBaseBonus, usesAutoBaseBonus, coefficient, adjustment, poolWeight, finalBonusOverride, finalBonus: finalBonusOverride ?? adjustment.finalBonus };
     });
 
     if (mode !== "pool") return baseRows;
 
-    const poolFinalBonuses = distributePoolByWeight(totalPoolValue, baseRows.map((row) => row.poolWeight), baseRows.map((row) => row.adjustment.individualAdjustmentAmount));
+    const poolFinalBonuses = distributePoolByWeightWithLockedFinals(
+      totalPoolValue,
+      baseRows.map((row) => row.poolWeight),
+      baseRows.map((row) => row.adjustment.individualAdjustmentAmount),
+      baseRows.map((row) => row.finalBonusOverride),
+    );
     return baseRows.map((row, index) => ({ ...row, finalBonus: poolFinalBonuses[index] ?? 0 }));
   }, [staff, rows, mode, totalPool]);
 
@@ -233,6 +266,14 @@ export function BonusCalculator({ staff }: Props) {
 
   function resetBaseBonusToAuto(id: number) {
     update(id, { baseBonus: "", baseBonusMode: "auto" });
+  }
+
+  function updateFinalBonus(id: number, value: string) {
+    update(id, { finalBonus: value, finalBonusMode: value === "" ? "auto" : "manual" });
+  }
+
+  function resetFinalBonusToAuto(id: number) {
+    update(id, { finalBonus: "", finalBonusMode: "auto" });
   }
 
   function saveLocal() {
@@ -318,6 +359,7 @@ export function BonusCalculator({ staff }: Props) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="truncate text-xl font-bold text-ink">{row.person.name}</h3>
                     <span className="rounded bg-slate-100 px-3 py-1 text-sm font-bold text-slate-700">{row.person.role}</span>
+                    {row.finalBonusOverride !== null ? <span className="rounded bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">最終賞与を上書き中</span> : null}
                     {mode === "pool" ? <span className={(row.usesAutoBaseBonus ? "bg-mint text-clinic" : "bg-amber-50 text-amber-700") + " rounded px-3 py-1 text-xs font-bold"}>{row.usesAutoBaseBonus ? "自動配分" : "個別上書き"}</span> : null}
                   </div>
                 </div>
@@ -333,7 +375,7 @@ export function BonusCalculator({ staff }: Props) {
 
               <details className="mt-3 rounded border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer text-base font-bold text-ink">総合補正の詳細・入力欄を開く</summary>
-                <div className="mt-4 grid gap-4 lg:grid-cols-[160px_220px_1fr]">
+                <div className="mt-4 grid gap-4 lg:grid-cols-[160px_220px_220px_1fr]">
                   <label className="space-y-1">
                     <span className="text-sm font-bold text-slate-600">基本給</span>
                     <input inputMode="numeric" value={row.input.baseSalary} onChange={(event) => update(row.person.id, { baseSalary: event.target.value })} className="h-12 w-full rounded border border-slate-300 px-3 text-right" placeholder="例 250000" />
@@ -345,6 +387,14 @@ export function BonusCalculator({ staff }: Props) {
                       {mode === "pool" && !row.usesAutoBaseBonus ? <button type="button" onClick={() => resetBaseBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="自動配分額に戻す"><RotateCcw size={18} /></button> : null}
                     </div>
                     {mode === "pool" ? <span className="block text-xs text-slate-500">均等配分額: {yen(row.suggestedBaseBonus)}。入力すると個別上書きになります。</span> : null}
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-sm font-bold text-slate-600">最終賞与</span>
+                    <div className="flex gap-2">
+                      <input inputMode="numeric" value={row.finalBonusOverride === null ? String(Math.round(row.finalBonus)) : row.input.finalBonus} onChange={(event) => updateFinalBonus(row.person.id, event.target.value)} className="h-12 min-w-0 flex-1 rounded border border-slate-300 px-3 text-right" placeholder="例 300000" />
+                      {row.finalBonusOverride !== null ? <button type="button" onClick={() => resetFinalBonusToAuto(row.person.id)} className="grid h-12 w-12 place-items-center rounded border border-clinic text-clinic" title="自動計算に戻す"><RotateCcw size={18} /></button> : null}
+                    </div>
+                    <span className="block text-xs text-slate-500">入力すると最終賞与を固定します。空欄にすると自動計算へ戻ります。</span>
                   </label>
                   <label className="space-y-1">
                     <span className="text-sm font-bold text-slate-600">メモ</span>

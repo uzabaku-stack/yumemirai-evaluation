@@ -43,6 +43,8 @@ type Props = {
 type BonusRowInput = {
   baseBonus?: string;
   baseBonusMode?: "auto" | "manual";
+  finalBonus?: string;
+  finalBonusMode?: "auto" | "manual";
   employmentAdjustmentRate?: string;
   workHoursAdjustmentRate?: string;
   attendanceAdjustmentRate?: string;
@@ -112,6 +114,23 @@ function distributePoolByWeight(total: number, weights: number[], fixedAdjustmen
   return rounded;
 }
 
+function distributePoolByWeightWithLockedFinals(total: number, weights: number[], fixedAdjustments: number[], lockedFinals: Array<number | null>) {
+  if (!weights.length) return [] as number[];
+  const results = lockedFinals.map((value) => value === null ? 0 : Math.max(0, Math.round(value)));
+  const unlockedIndexes = weights.map((_, index) => index).filter((index) => lockedFinals[index] === null);
+  if (!unlockedIndexes.length) return results;
+  const lockedTotal = results.reduce((sum, value, index) => sum + (lockedFinals[index] === null ? 0 : value), 0);
+  const unlockedBonuses = distributePoolByWeight(
+    Math.max(0, Math.round(total) - lockedTotal),
+    unlockedIndexes.map((index) => weights[index]),
+    unlockedIndexes.map((index) => fixedAdjustments[index]),
+  );
+  unlockedIndexes.forEach((index, cursor) => {
+    results[index] = unlockedBonuses[cursor] ?? 0;
+  });
+  return results;
+}
+
 function loadBonusSettings() {
   try {
     const stored = window.localStorage.getItem("yumemirai_bonus_calculator_v5")
@@ -138,12 +157,13 @@ function reportsWithBonus(reports: StaffExportReport[]) {
     const coefficient = calculateEvaluationStandardizationMultiplier(report.bonusScore ?? report.standardizedScore ?? report.finalEvaluation);
     const overallMultiplier = multiplier(input.employmentAdjustmentRate ?? "100") * multiplier(input.workHoursAdjustmentRate ?? "100") * multiplier(input.attendanceAdjustmentRate ?? "100");
     const individualAdjustment = numberValue(input.individualAdjustmentAmount);
+    const finalBonusOverride = input.finalBonusMode === "manual" && input.finalBonus !== undefined && input.finalBonus !== "" ? Math.max(0, numberValue(input.finalBonus)) : null;
     const referenceFinal = baseBonus * coefficient * overallMultiplier + individualAdjustment;
     const poolWeight = Math.max(0, baseBonus) * coefficient * overallMultiplier;
-    return { report, baseBonus, referenceFinal, poolWeight, individualAdjustment };
+    return { report, baseBonus, referenceFinal, poolWeight, individualAdjustment, finalBonusOverride };
   });
-  const poolFinals = mode === "pool" ? distributePoolByWeight(totalPool, prepared.map((row) => row.poolWeight), prepared.map((row) => row.individualAdjustment)) : [];
-  return prepared.map((row, index) => ({ ...row.report, baseBonus: row.baseBonus, finalBonus: mode === "pool" ? (poolFinals[index] ?? 0) : row.referenceFinal }));
+  const poolFinals = mode === "pool" ? distributePoolByWeightWithLockedFinals(totalPool, prepared.map((row) => row.poolWeight), prepared.map((row) => row.individualAdjustment), prepared.map((row) => row.finalBonusOverride)) : [];
+  return prepared.map((row, index) => ({ ...row.report, baseBonus: row.baseBonus, finalBonus: mode === "pool" ? (poolFinals[index] ?? 0) : (row.finalBonusOverride ?? row.referenceFinal) }));
 }
 
 function csvRows(evaluations: Evaluation[]) {
