@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, RotateCcw, Save } from "lucide-react";
 import { calculateBonusAdjustment, calculateEvaluationStandardizationMultiplier, evaluationStandardizationAdjustmentDescription, ratePercentToMultiplier } from "@/lib/bonusAdjustment";
+import type { BonusCalculation, EvaluationCycle } from "@/lib/types";
 
 type BonusStaff = {
   id: number;
@@ -36,11 +37,13 @@ type LegacyRowInput = Partial<RowInput> & {
 
 type Props = {
   staff: BonusStaff[];
+  cycles: EvaluationCycle[];
+  selectedCycleId: number | null;
+  initialCalculations: BonusCalculation[];
 };
 
 const storageKey = "yumemirai_bonus_calculator_v5";
-const legacyStorageKeys = ["yumemirai_bonus_calculator_v4", "yumemirai_bonus_calculator_v3", "yumemirai_bonus_calculator_v2"];
-const percentageOptions = [50, 60, 70, 80, 90, 100, 110, 120];
+const percentageOptions = Array.from({ length: 15 }, (_, index) => 50 + index * 5);
 
 function yen(value: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }).format(Math.round(value));
@@ -192,28 +195,43 @@ function RateSelect({ id, value, onChange, label }: { id: string; value: string;
   );
 }
 
-export function BonusCalculator({ staff }: Props) {
-  const [rows, setRows] = useState<Record<string, RowInput>>(() => initialRows(staff));
-  const [mode, setMode] = useState<CalculationMode>("base");
-  const [totalPool, setTotalPool] = useState("");
+function nextBonusCycleInput(cycle: EvaluationCycle | null | undefined) {
+  const baseDate = cycle?.endDate ? new Date(cycle.endDate + "T00:00:00") : new Date();
+  const year = baseDate.getFullYear();
+  const isSummer = String(cycle?.name ?? "").includes("夏") || baseDate.getMonth() < 8;
+  const nextYear = isSummer ? year : year + 1;
+  const name = nextYear + "年 " + (isSummer ? "冬評価" : "夏評価");
+  return isSummer
+    ? { name, startDate: nextYear + "-09-01", endDate: nextYear + "-12-31", status: "active" }
+    : { name, startDate: nextYear + "-01-01", endDate: nextYear + "-08-31", status: "active" };
+}
+
+export function BonusCalculator({ staff, cycles, selectedCycleId, initialCalculations }: Props) {
+  const selectedCycle = cycles.find((cycle) => cycle.id === selectedCycleId) ?? null;
+  const selectedCalculation = initialCalculations.find((calculation) => calculation.evaluation_cycle_id === selectedCycleId) ?? null;
+  const [calculationId, setCalculationId] = useState<number | null>(selectedCalculation?.id ?? null);
+  const [rows, setRows] = useState<Record<string, RowInput>>(() => ({ ...initialRows(staff), ...normalizeRows(selectedCalculation?.rows as Record<string, LegacyRowInput> | undefined) }));
+  const [mode, setMode] = useState<CalculationMode>(selectedCalculation?.mode ?? "base");
+  const [totalPool, setTotalPool] = useState(selectedCalculation?.total_pool ?? "");
   const [savedMessage, setSavedMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCreatingCycle, setIsCreatingCycle] = useState(false);
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey) ?? legacyStorageKeys.map((key) => window.localStorage.getItem(key)).find(Boolean);
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as { rows?: Record<string, LegacyRowInput>; mode?: CalculationMode; totalPool?: string };
-      if (parsed.rows) setRows((current) => ({ ...current, ...normalizeRows(parsed.rows) }));
-      if (parsed.mode === "base" || parsed.mode === "pool") setMode(parsed.mode);
-      if (parsed.totalPool) setTotalPool(parsed.totalPool);
-    } catch (error) {
-      console.error("bonus settings load failed", error);
+    if (selectedCalculation) {
+      setCalculationId(selectedCalculation.id);
+      setRows({ ...initialRows(staff), ...normalizeRows(selectedCalculation.rows as Record<string, LegacyRowInput> | undefined) });
+      setMode(selectedCalculation.mode);
+      setTotalPool(selectedCalculation.total_pool);
+      setSavedMessage("保存済みの賞与計算を読み込みました。");
+      return;
     }
-  }, []);
-
-  useEffect(() => {
-    setRows((current) => ({ ...initialRows(staff), ...current }));
-  }, [staff]);
+    setCalculationId(null);
+    setRows(initialRows(staff));
+    setMode("base");
+    setTotalPool("");
+    setSavedMessage("");
+  }, [selectedCalculation, staff]);
 
   const calculated = useMemo(() => {
     const totalPoolValue = numberValue(totalPool);
@@ -276,9 +294,57 @@ export function BonusCalculator({ staff }: Props) {
     update(id, { finalBonus: "", finalBonusMode: "auto" });
   }
 
-  function saveLocal() {
+  async function saveLocal() {
+    setIsSaving(true);
+    setSavedMessage("");
     window.localStorage.setItem(storageKey, JSON.stringify({ rows, mode, totalPool }));
-    setSavedMessage("この端末に保存しました。");
+    try {
+      const response = await fetch("/api/bonus-calculations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: calculationId, evaluation_cycle_id: selectedCycleId, name: selectedCycle?.name ?? "賞与計算", mode, total_pool: totalPool, rows }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "保存できませんでした");
+      setCalculationId(data.calculation.id);
+      setSavedMessage("賞与計算を保存しました。");
+    } catch (error) {
+      console.error("save bonus calculation failed", error);
+      setSavedMessage("保存できませんでした。この端末には一時保存しています。");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function resetCurrentCalculation() {
+    if (!window.confirm((selectedCycle?.name ?? "この評価期間") + "の賞与計算を新しく入力し直します。現在の画面の未保存変更は消えます。よろしいですか？")) return;
+    setCalculationId(selectedCalculation?.id ?? null);
+    setRows(initialRows(staff));
+    setMode("base");
+    setTotalPool("");
+    setSavedMessage("新しい賞与計算を開始しました。保存するとこの評価期間の賞与計算として保管されます。");
+  }
+
+  async function createNextCycle() {
+    const next = nextBonusCycleInput(selectedCycle);
+    const name = window.prompt("新しい評価期間名", next.name);
+    if (!name) return;
+    setIsCreatingCycle(true);
+    try {
+      const response = await fetch("/api/evaluation-cycles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...next, name }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.message || "評価期間を作成できませんでした");
+      window.location.href = "/bonus?cycleId=" + data.cycle.id;
+    } catch (error) {
+      console.error("create bonus cycle failed", error);
+      setSavedMessage("新しい評価期間を作成できませんでした。");
+    } finally {
+      setIsCreatingCycle(false);
+    }
   }
 
   function exportCsv() {
@@ -318,6 +384,25 @@ export function BonusCalculator({ staff }: Props) {
 
   return (
     <div className="space-y-5">
+      <section className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold">賞与計算の保存・期間切り替え</h2>
+            <p className="mt-1 text-sm text-slate-600">夏・冬など評価期間ごとに賞与計算を保存し、あとから呼び出せます。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select value={selectedCycleId ?? ""} onChange={(event) => { window.location.href = "/bonus?cycleId=" + event.target.value; }} className="h-12 rounded border border-slate-300 bg-white px-3 font-bold">
+              {cycles.map((cycle) => <option key={cycle.id} value={cycle.id}>{cycle.name}</option>)}
+            </select>
+            <button type="button" onClick={resetCurrentCalculation} className="min-h-12 rounded border border-clinic px-4 py-3 font-bold text-clinic">この期間で新規開始</button>
+            <button type="button" onClick={createNextCycle} disabled={isCreatingCycle} className="min-h-12 rounded bg-clinic px-4 py-3 font-bold text-white disabled:opacity-50">{isCreatingCycle ? "作成中..." : "次の賞与期間を作成"}</button>
+          </div>
+        </div>
+        <div className="mt-3 rounded bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+          現在の期間: {selectedCycle?.name ?? "-"} / 保存状態: {calculationId ? "保存済み" : "未保存"}
+        </div>
+      </section>
+
       <section className="grid gap-4 md:grid-cols-3">
         <div className="rounded border border-teal-900/10 bg-white p-5 shadow-soft">
           <div className="text-sm font-bold text-slate-500">計算モード</div>
@@ -345,7 +430,7 @@ export function BonusCalculator({ staff }: Props) {
             <p className="mt-1 text-sm text-slate-600">通常表示は必要な金額だけに絞り、総合補正の詳細と入力欄は折りたたみ内にまとめています。</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={saveLocal} className="flex min-h-12 items-center gap-2 rounded border border-clinic px-5 py-3 font-bold text-clinic"><Save size={18} />この端末に保存</button>
+            <button type="button" onClick={saveLocal} disabled={isSaving} className="flex min-h-12 items-center gap-2 rounded border border-clinic px-5 py-3 font-bold text-clinic disabled:opacity-50"><Save size={18} />{isSaving ? "保存中..." : "賞与計算を保存"}</button>
             <button type="button" onClick={exportCsv} className="flex min-h-12 items-center gap-2 rounded bg-clinic px-5 py-3 font-bold text-white"><Download size={18} />CSV出力</button>
           </div>
           {savedMessage ? <div className="w-full rounded bg-mint px-4 py-3 font-bold text-clinic">{savedMessage}</div> : null}
