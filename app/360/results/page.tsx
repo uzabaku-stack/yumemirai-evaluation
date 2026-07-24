@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FileText, History, MessageSquareText, UserCheck } from "lucide-react";
+import { EvaluationResultsArchivePanel } from "@/components/EvaluationResultsArchivePanel";
 import { EvaluationResultsTable } from "@/components/EvaluationResultsTable";
 import type { StaffExportReport } from "@/components/EvaluationExportButtons";
 import { SaveEvaluationResultsButton } from "@/components/SaveEvaluationResultsButton";
 import { StaffAnalysisPrintButton } from "@/components/StaffAnalysisPrintButton";
 import { getCurrentUser } from "@/lib/auth";
-import { get360SummaryForCycle, getEvaluationCycles, getEvaluationResultSnapshotForCycle, getEvaluations, getStaffList } from "@/lib/db";
+import { get360SummaryForCycle, getEvaluationCycles, getEvaluationResultSnapshotForCycle, getEvaluationScores, getEvaluations, getStaffList } from "@/lib/db";
 import { getEvaluationCompletionStats } from "@/lib/evaluationCompletion";
 import { calculateEvaluationStandardization } from "@/lib/evaluationStandardization";
 import { isDirectorRole } from "@/lib/permissions";
@@ -243,13 +244,39 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const standardized = calculateEvaluationStandardization(standardizationEvaluations);
   const standardizedByStaff = new Map(standardized.staffScores.map((score) => [score.staffId, { standardizedScore: score.standardizedScore, bonusScore: score.bonusScore }]));
   const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-", standardizedByStaff);
+  const allStaffReports = buildStaffReports(displayableStaffRows, selectedCycle?.name ?? "-", standardizedByStaff);
   const savedSnapshot = getEvaluationResultSnapshotForCycle(selectedCycle?.id ?? null);
+  const raw360Rows = evaluations
+    .filter((evaluation) => isTargetStaff(evaluation.staff_id) && (!selectedCycle?.id || evaluation.evaluation_cycle_id === selectedCycle.id) && evaluation.is_360 === 1)
+    .map((evaluation) => {
+      const scores = getEvaluationScores(evaluation.id);
+      return {
+        evaluationId: evaluation.id,
+        cycleName: selectedCycle?.name ?? evaluation.evaluation_cycle_name ?? "-",
+        entryDate: evaluation.entry_date,
+        evaluatorName: evaluation.evaluator_name,
+        evaluatorStaffName: evaluation.evaluator_staff_name ?? "",
+        targetStaffName: evaluation.staff_name ?? "",
+        evaluationType: evaluation.evaluation_type,
+        averageScore: evaluation.average_score,
+        scoreCount: scores.filter((score) => score.score !== null && score.score !== undefined).length,
+        notApplicableCount: scores.filter((score) => score.not_applicable).length,
+        updatedAt: evaluation.updated_at || evaluation.created_at,
+        scores: scores.map((score) => ({
+          sectionName: score.section_name ?? "",
+          itemName: score.item_name ?? "",
+          score: score.score,
+          notApplicable: score.not_applicable ? 1 : 0,
+        })),
+      };
+    });
   const resultSnapshot = {
     cycle: selectedCycle,
     completion: { completedCount: completion.completedCount, targetStaffCount: completion.targetStaffCount, missingCount: completion.missingCount },
     evaluations: listedEvaluations,
-    staffReports,
-    saved_staff_ids: staffRows.map((row) => row.staff.id),
+    staffReports: allStaffReports,
+    raw360Rows,
+    saved_staff_ids: displayableStaffRows.map((row) => row.staff.id),
     created_from: "evaluation-results",
   };
 
@@ -326,6 +353,8 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
         </p>
         <EvaluationResultsTable evaluations={selectedStaffId ? listedEvaluations.filter((evaluation) => evaluation.staff_id === selectedStaffId) : listedEvaluations} staffReports={staffReports} />
       </section>
+
+      <EvaluationResultsArchivePanel cycleName={selectedCycle?.name ?? "評価結果"} savedAt={savedSnapshot?.updated_at ?? null} staffReports={allStaffReports} raw360Rows={raw360Rows} />
 
       <section className="staff-analysis-list space-y-5">
         <h2 className="text-2xl font-bold">スタッフごとの評価結果</h2>

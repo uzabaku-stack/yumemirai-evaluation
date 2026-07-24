@@ -32,4 +32,9 @@ button, input, select, textarea { font: inherit; }
   body.printing-staff-analysis .staff-analysis-card.print-target { display: block !important; border: 0 !important; padding: 0 !important; background: white !important; }
   body.printing-staff-analysis .staff-analysis-card.print-target .overflow-x-auto { overflow: visible !important; }
   body.printing-staff-analysis .staff-analysis-card.print-target table { min-width: 0 !important; width: 100% !important; }
+  body.printing-evaluation-archive main > div > :not(.evaluation-archive-print) { display: none !important; }
+  body.printing-evaluation-archive .evaluation-archive-print { border: 0 !important; box-shadow: none !important; padding: 0 !important; background: white !important; }
+  body.printing-evaluation-archive .evaluation-archive-print .overflow-auto,
+  body.printing-evaluation-archive .evaluation-archive-print .overflow-x-auto { overflow: visible !important; max-height: none !important; }
+  body.printing-evaluation-archive .evaluation-archive-print table { min-width: 0 !important; width: 100% !important; }
 }
