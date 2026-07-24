@@ -3,9 +3,10 @@ import { redirect } from "next/navigation";
 import { FileText, History, MessageSquareText, UserCheck } from "lucide-react";
 import { EvaluationResultsTable } from "@/components/EvaluationResultsTable";
 import type { StaffExportReport } from "@/components/EvaluationExportButtons";
+import { SaveEvaluationResultsButton } from "@/components/SaveEvaluationResultsButton";
 import { StaffAnalysisPrintButton } from "@/components/StaffAnalysisPrintButton";
 import { getCurrentUser } from "@/lib/auth";
-import { get360SummaryForCycle, getEvaluationCycles, getEvaluations, getStaffList } from "@/lib/db";
+import { get360SummaryForCycle, getEvaluationCycles, getEvaluationResultSnapshotForCycle, getEvaluations, getStaffList } from "@/lib/db";
 import { getEvaluationCompletionStats } from "@/lib/evaluationCompletion";
 import { calculateEvaluationStandardization } from "@/lib/evaluationStandardization";
 import { isDirectorRole } from "@/lib/permissions";
@@ -242,6 +243,15 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
   const standardized = calculateEvaluationStandardization(standardizationEvaluations);
   const standardizedByStaff = new Map(standardized.staffScores.map((score) => [score.staffId, { standardizedScore: score.standardizedScore, bonusScore: score.bonusScore }]));
   const staffReports = buildStaffReports(staffRows, selectedCycle?.name ?? "-", standardizedByStaff);
+  const savedSnapshot = getEvaluationResultSnapshotForCycle(selectedCycle?.id ?? null);
+  const resultSnapshot = {
+    cycle: selectedCycle,
+    completion: { completedCount: completion.completedCount, targetStaffCount: completion.targetStaffCount, missingCount: completion.missingCount },
+    evaluations: listedEvaluations,
+    staffReports,
+    saved_staff_ids: staffRows.map((row) => row.staff.id),
+    created_from: "evaluation-results",
+  };
 
   return (
     <div className="space-y-6">
@@ -251,6 +261,7 @@ export default async function EvaluationResultsPage({ searchParams }: { searchPa
           <p className="mt-1 text-slate-600">スタッフごとの評価結果・履歴・削除を管理します。</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <SaveEvaluationResultsButton cycleId={selectedCycle?.id ?? null} cycleName={selectedCycle?.name ?? "評価結果"} results={resultSnapshot} savedAt={savedSnapshot?.updated_at ?? null} />
           <Link href="/analytics" className="rounded border border-clinic px-5 py-4 font-bold text-clinic">集計分析へ</Link>
           <Link href="/" className="rounded bg-clinic px-5 py-4 font-bold text-white">トップへ戻る</Link>
         </div>

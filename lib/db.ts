@@ -3,12 +3,12 @@ import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { calculateSummary, defaultRatingCriteria, formatRatingCriteria } from "./scoring";
 import { isSupabaseConfigured, loadSupabaseAppData, saveSupabaseAppData, type SupabaseAppData } from "./supabase";
-import type { AppUser, BonusCalculation, BonusCalculationMode, CommentValues, CurrentUser, Evaluation, EvaluationCycle, EvaluationCycleStatus, EvaluationItem, EvaluationScore, EvaluationType, RatingCriterion, Staff, StaffRole } from "./types";
+import type { AppUser, BonusCalculation, BonusCalculationMode, CommentValues, CurrentUser, Evaluation, EvaluationCycle, EvaluationCycleStatus, EvaluationItem, EvaluationResultSnapshot, EvaluationScore, EvaluationType, RatingCriterion, Staff, StaffRole } from "./types";
 import { isDirectorRole } from "@/lib/permissions";
 
 type JsonEvaluationScore = EvaluationScore & { id: number };
 type AppData = {
-  nextIds: { staff: number; evaluation: number; item: number; score: number; user: number; staff_role?: number; evaluation_cycle?: number; bonus_calculation?: number; __bonus_calculations?: unknown };
+  nextIds: { staff: number; evaluation: number; item: number; score: number; user: number; staff_role?: number; evaluation_cycle?: number; bonus_calculation?: number; evaluation_result_snapshot?: number; __bonus_calculations?: unknown; __evaluation_result_snapshots?: unknown };
   staff: Staff[];
   users: AppUser[];
   evaluation_items: EvaluationItem[];
@@ -18,6 +18,7 @@ type AppData = {
   staff_roles: StaffRole[];
   evaluation_cycles: EvaluationCycle[];
   bonus_calculations: BonusCalculation[];
+  evaluation_result_snapshots: EvaluationResultSnapshot[];
 };
 
 const defaultDataFile = path.join(process.cwd(), "data", "yumemirai.json");
@@ -336,16 +337,16 @@ function normalizeRatingCriteria(criteria: RatingCriterion[] | undefined): Ratin
     return { score: fallback.score, label: current?.label || fallback.label, description: current?.description || fallback.description, criterion_order: fallback.score };
   });
 }
-function createEmptyData(): AppData { return { nextIds: { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1, bonus_calculation: 1 }, staff: [], users: [], evaluation_items: [], evaluations: [], evaluation_scores: [], rating_criteria: [], staff_roles: [], evaluation_cycles: [], bonus_calculations: [] }; }
+function createEmptyData(): AppData { return { nextIds: { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1, bonus_calculation: 1, evaluation_result_snapshot: 1 }, staff: [], users: [], evaluation_items: [], evaluations: [], evaluation_scores: [], rating_criteria: [], staff_roles: [], evaluation_cycles: [], bonus_calculations: [], evaluation_result_snapshots: [] }; }
 function commentsSnapshot(data: AppData) {
   return data.evaluations.map((evaluation) => ({ id: evaluation.id, evaluation_id: evaluation.id, evaluation_cycle_id: evaluation.evaluation_cycle_id ?? null, staff_id: evaluation.staff_id, evaluator_user_id: evaluation.evaluator_user_id ?? null, evaluator_staff_id: evaluation.evaluator_staff_id ?? null, evaluation_type: evaluation.evaluation_type, comments: evaluation.comments, updated_at: evaluation.updated_at }));
 }
 function toSupabaseAppData(data: AppData): SupabaseAppData {
-  return { nextIds: { ...data.nextIds, __bonus_calculations: data.bonus_calculations }, staff: data.staff, jobRoles: data.staff_roles, evaluationItems: data.evaluation_items, ratingCriteria: data.rating_criteria, evaluations: data.evaluations, evaluationScores: data.evaluation_scores, evaluationCycles: data.evaluation_cycles, users: data.users, comments: commentsSnapshot(data) };
+  return { nextIds: { ...data.nextIds, __bonus_calculations: data.bonus_calculations, __evaluation_result_snapshots: data.evaluation_result_snapshots }, staff: data.staff, jobRoles: data.staff_roles, evaluationItems: data.evaluation_items, ratingCriteria: data.rating_criteria, evaluations: data.evaluations, evaluationScores: data.evaluation_scores, evaluationCycles: data.evaluation_cycles, users: data.users, comments: commentsSnapshot(data) };
 }
 function fromSupabaseAppData(source: SupabaseAppData): AppData {
   const nextIds = source.nextIds as AppData["nextIds"];
-  return { ...createEmptyData(), nextIds, staff: source.staff as Staff[], staff_roles: source.jobRoles as StaffRole[], evaluation_items: source.evaluationItems as EvaluationItem[], rating_criteria: source.ratingCriteria as RatingCriterion[], evaluations: source.evaluations as Evaluation[], evaluation_scores: source.evaluationScores as JsonEvaluationScore[], evaluation_cycles: source.evaluationCycles as EvaluationCycle[], users: source.users as AppUser[], bonus_calculations: Array.isArray(nextIds?.__bonus_calculations) ? nextIds.__bonus_calculations as BonusCalculation[] : [] };
+  return { ...createEmptyData(), nextIds, staff: source.staff as Staff[], staff_roles: source.jobRoles as StaffRole[], evaluation_items: source.evaluationItems as EvaluationItem[], rating_criteria: source.ratingCriteria as RatingCriterion[], evaluations: source.evaluations as Evaluation[], evaluation_scores: source.evaluationScores as JsonEvaluationScore[], evaluation_cycles: source.evaluationCycles as EvaluationCycle[], users: source.users as AppUser[], bonus_calculations: Array.isArray(nextIds?.__bonus_calculations) ? nextIds.__bonus_calculations as BonusCalculation[] : [], evaluation_result_snapshots: Array.isArray(nextIds?.__evaluation_result_snapshots) ? nextIds.__evaluation_result_snapshots as EvaluationResultSnapshot[] : [] };
 }
 async function saveData(data: AppData) {
   if (isSupabaseConfigured()) await saveSupabaseAppData(toSupabaseAppData(data));
@@ -390,9 +391,9 @@ function ensureEvaluationCycles(data: AppData) {
   }
 }
 function normalizeIds(data: AppData) {
-  const ids = data.nextIds ?? { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1, bonus_calculation: 1 };
-  data.nextIds = { staff: ids.staff ?? 1, evaluation: ids.evaluation ?? 1, item: ids.item ?? 1, score: ids.score ?? 1, user: ids.user ?? 1, staff_role: ids.staff_role ?? 1, evaluation_cycle: ids.evaluation_cycle ?? 1, bonus_calculation: ids.bonus_calculation ?? 1, __bonus_calculations: ids.__bonus_calculations };
-  data.staff ??= []; data.users ??= []; data.evaluation_items ??= []; data.evaluations ??= []; data.evaluation_scores ??= []; data.rating_criteria ??= []; data.staff_roles ??= []; data.evaluation_cycles ??= []; data.bonus_calculations ??= [];
+  const ids = data.nextIds ?? { staff: 1, evaluation: 1, item: 1, score: 1, user: 1, staff_role: 1, evaluation_cycle: 1, bonus_calculation: 1, evaluation_result_snapshot: 1 };
+  data.nextIds = { staff: ids.staff ?? 1, evaluation: ids.evaluation ?? 1, item: ids.item ?? 1, score: ids.score ?? 1, user: ids.user ?? 1, staff_role: ids.staff_role ?? 1, evaluation_cycle: ids.evaluation_cycle ?? 1, bonus_calculation: ids.bonus_calculation ?? 1, evaluation_result_snapshot: ids.evaluation_result_snapshot ?? 1, __bonus_calculations: ids.__bonus_calculations, __evaluation_result_snapshots: ids.__evaluation_result_snapshots };
+  data.staff ??= []; data.users ??= []; data.evaluation_items ??= []; data.evaluations ??= []; data.evaluation_scores ??= []; data.rating_criteria ??= []; data.staff_roles ??= []; data.evaluation_cycles ??= []; data.bonus_calculations ??= []; data.evaluation_result_snapshots ??= [];
   data.staff = data.staff.map((staff) => ({ ...staff, role: normalizeStaffRole(staff.role) }));
   data.users = data.users.map((user) => {
     const fallbackPassword = user.pin || (isDirectorRole(user.role) ? defaultDirectorPassword : defaultStaffPassword);
@@ -427,6 +428,7 @@ function normalizeIds(data: AppData) {
   data.nextIds.staff_role = Math.max(data.nextIds.staff_role ?? 1, ...data.staff_roles.map((item) => item.id + 1), 1);
   data.nextIds.evaluation_cycle = Math.max(data.nextIds.evaluation_cycle ?? 1, ...data.evaluation_cycles.map((item) => item.id + 1), 1);
   data.nextIds.bonus_calculation = Math.max(data.nextIds.bonus_calculation ?? 1, ...data.bonus_calculations.map((item) => item.id + 1), 1);
+  data.nextIds.evaluation_result_snapshot = Math.max(data.nextIds.evaluation_result_snapshot ?? 1, ...data.evaluation_result_snapshots.map((item) => item.id + 1), 1);
 }
 function seedData(data: AppData) {
   let changed = false;
@@ -439,6 +441,7 @@ function seedData(data: AppData) {
   }
   data.staff_roles = data.staff_roles.map((role, index) => ({ ...role, name: normalizeStaffRole(role.name), role_order: role.role_order || index + 1, active: role.active ? 1 : 0 }));
   data.bonus_calculations = data.bonus_calculations.map((calculation) => ({ id: Number(calculation.id), evaluation_cycle_id: calculation.evaluation_cycle_id === null || calculation.evaluation_cycle_id === undefined ? null : Number(calculation.evaluation_cycle_id), name: String(calculation.name ?? "").trim() || "賞与計算", mode: (calculation.mode === "pool" ? "pool" : "base") as BonusCalculationMode, total_pool: String(calculation.total_pool ?? ""), rows: calculation.rows && typeof calculation.rows === "object" && !Array.isArray(calculation.rows) ? calculation.rows : {}, created_at: String(calculation.created_at ?? now()), updated_at: String(calculation.updated_at ?? calculation.created_at ?? now()) })).filter((calculation) => Number.isFinite(calculation.id));
+  data.evaluation_result_snapshots = data.evaluation_result_snapshots.map((snapshot) => ({ id: Number(snapshot.id), evaluation_cycle_id: snapshot.evaluation_cycle_id === null || snapshot.evaluation_cycle_id === undefined ? null : Number(snapshot.evaluation_cycle_id), name: String(snapshot.name ?? "").trim() || "評価結果", results: snapshot.results && typeof snapshot.results === "object" && !Array.isArray(snapshot.results) ? snapshot.results : {}, created_at: String(snapshot.created_at ?? now()), updated_at: String(snapshot.updated_at ?? snapshot.created_at ?? now()) })).filter((snapshot) => Number.isFinite(snapshot.id));
   for (const name of staffSeeds) {
     if (!data.staff.some((staff) => staff.name === name)) { data.staff.push({ id: data.nextIds.staff++, name, role: "歯科衛生士", active: 1, created_at: now() }); changed = true; }
   }
@@ -662,6 +665,30 @@ export async function saveBonusCalculation(input: { id?: number | null; evaluati
   store.bonus_calculations.push(calculation);
   await persist();
   return calculation;
+}
+export function getEvaluationResultSnapshots() {
+  return [...store.evaluation_result_snapshots].sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id);
+}
+export function getEvaluationResultSnapshotForCycle(cycleId: number | null | undefined) {
+  return getEvaluationResultSnapshots().find((snapshot) => snapshot.evaluation_cycle_id === (cycleId ?? null));
+}
+export async function saveEvaluationResultSnapshot(input: { evaluation_cycle_id?: number | null; name?: string; results: Record<string, unknown> }) {
+  const timestamp = now();
+  const cycleId = input.evaluation_cycle_id ?? null;
+  const cycle = cycleId ? store.evaluation_cycles.find((item) => item.id === cycleId) : null;
+  const existing = store.evaluation_result_snapshots.find((snapshot) => snapshot.evaluation_cycle_id === cycleId);
+  if (existing) {
+    existing.name = String(input.name ?? "").trim() || cycle?.name || existing.name || "評価結果";
+    existing.results = input.results && typeof input.results === "object" ? input.results : {};
+    existing.updated_at = timestamp;
+    await persist();
+    return existing;
+  }
+  const snapshot: EvaluationResultSnapshot = { id: store.nextIds.evaluation_result_snapshot ?? 1, evaluation_cycle_id: cycleId, name: String(input.name ?? "").trim() || cycle?.name || "評価結果", results: input.results && typeof input.results === "object" ? input.results : {}, created_at: timestamp, updated_at: timestamp };
+  store.nextIds.evaluation_result_snapshot = snapshot.id + 1;
+  store.evaluation_result_snapshots.push(snapshot);
+  await persist();
+  return snapshot;
 }
 export function getStaffEvaluationHistory(staffId: number) {
   const staff = store.staff.find((person) => person.id === staffId);
