@@ -35,6 +35,12 @@ type LegacyRowInput = Partial<RowInput> & {
   overallAdjustmentRate?: string;
 };
 
+type BonusCalculationSnapshot = {
+  rows?: Record<string, LegacyRowInput>;
+  mode?: CalculationMode;
+  totalPool?: string;
+};
+
 type Props = {
   staff: BonusStaff[];
   cycles: EvaluationCycle[];
@@ -43,6 +49,7 @@ type Props = {
 };
 
 const storageKey = "yumemirai_bonus_calculator_v5";
+const legacyStorageKeys = ["yumemirai_bonus_calculator_v4", "yumemirai_bonus_calculator_v3", "yumemirai_bonus_calculator_v2"];
 const percentageOptions = Array.from({ length: 15 }, (_, index) => 50 + index * 5);
 
 function yen(value: number) {
@@ -216,6 +223,26 @@ export function BonusCalculator({ staff, cycles, selectedCycleId, initialCalcula
   const [savedMessage, setSavedMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isCreatingCycle, setIsCreatingCycle] = useState(false);
+  const [localBackup, setLocalBackup] = useState<BonusCalculationSnapshot | null>(null);
+
+  useEffect(() => {
+    if (selectedCalculation) {
+      setLocalBackup(null);
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(storageKey) ?? legacyStorageKeys.map((key) => window.localStorage.getItem(key)).find(Boolean);
+      if (!stored) {
+        setLocalBackup(null);
+        return;
+      }
+      const parsed = JSON.parse(stored) as BonusCalculationSnapshot;
+      setLocalBackup(parsed.rows ? parsed : null);
+    } catch (error) {
+      console.error("bonus local backup load failed", error);
+      setLocalBackup(null);
+    }
+  }, [selectedCalculation]);
 
   useEffect(() => {
     if (selectedCalculation) {
@@ -325,6 +352,16 @@ export function BonusCalculator({ staff, cycles, selectedCycleId, initialCalcula
     setSavedMessage("新しい賞与計算を開始しました。保存するとこの評価期間の賞与計算として保管されます。");
   }
 
+  function loadLocalBackup() {
+    if (!localBackup?.rows) return;
+    const ok = window.confirm("この端末に残っている前回の賞与計算データを読み込みます。現在の画面の未保存内容は置き換わります。よろしいですか？");
+    if (!ok) return;
+    setRows({ ...initialRows(staff), ...normalizeRows(localBackup.rows) });
+    if (localBackup.mode === "base" || localBackup.mode === "pool") setMode(localBackup.mode);
+    setTotalPool(localBackup.totalPool ?? "");
+    setSavedMessage("この端末に残っていた前回の賞与計算を読み込みました。残す場合は「賞与計算を保存」を押してください。");
+  }
+
   async function createNextCycle() {
     const next = nextBonusCycleInput(selectedCycle);
     const name = window.prompt("新しい評価期間名", next.name);
@@ -401,6 +438,12 @@ export function BonusCalculator({ staff, cycles, selectedCycleId, initialCalcula
         <div className="mt-3 rounded bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
           現在の期間: {selectedCycle?.name ?? "-"} / 保存状態: {calculationId ? "保存済み" : "未保存"}
         </div>
+        {!calculationId && localBackup?.rows ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-bold text-amber-800">この端末に前回の賞与計算データが残っています。</p>
+            <button type="button" onClick={loadLocalBackup} className="min-h-11 rounded bg-amber-600 px-4 py-2 font-bold text-white">前回の端末保存データを読み込む</button>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
